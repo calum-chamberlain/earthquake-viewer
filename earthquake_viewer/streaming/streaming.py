@@ -154,9 +154,9 @@ class _StreamingClient(ABC):
     def _get_stream(self) -> Stream:
         """ Get a copy of the current data in buffer. """
         with self.lock:
-            Logger.info(f"Copying data: Lock status: {self.lock.locked()}")
+            Logger.debug(f"Copying data: Lock status: {self.lock.locked()}")
             stream = self.buffer.stream
-        Logger.info(
+        Logger.debug(
             f"Finished getting the data: Lock status: {self.lock.locked()}")
         return stream
 

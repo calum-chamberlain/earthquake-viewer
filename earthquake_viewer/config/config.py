@@ -72,6 +72,7 @@ class PlottingConfig(_ConfigAttribDict):
         "figure_size": (10, 10),
         "lowcut": 1.0,
         "highcut": 25.0,
+        "update_interval": 10,
         "plot_map": True,
         "map_width_percent": 30,
         "map_client": "GEONET",

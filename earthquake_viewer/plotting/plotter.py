@@ -6,6 +6,8 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import logging
+import numpy as np
+import matplotlib
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
@@ -21,6 +23,34 @@ Logger = logging.getLogger(__name__)
 
 def _scale_mags(magnitudes: Iterable) -> Iterable:
     return [m ** 3 for m in magnitudes]
+
+
+def _blit_draw(self, artists):
+    # Handles blitted drawing, which renders only the artists given instead
+    # of the entire figure.
+    updated_ax = {a.axes for a in artists}
+    # Enumerate artists to cache axes' backgrounds. We do not draw
+    # artists yet to not cache foreground from plots with shared axes
+    for ax in updated_ax:
+        # If we haven't cached the background for the current view of this
+        # axes object, do so now. This might not always be reliable, but
+        # it's an attempt to automate the process.
+        cur_view = ax._get_view()
+        view, bg = self._blit_cache.get(ax, (object(), None))
+        bbox = ax.get_tightbbox(ax.figure.canvas.get_renderer())
+        if cur_view != view:
+            self._blit_cache[ax] = (
+                cur_view, ax.figure.canvas.copy_from_bbox(bbox))
+    # Make a separate pass to draw foreground.
+    for a in artists:
+        a.axes.draw_artist(a)
+    # After rendering all the needed artists, blit each axes individually.
+    for ax in updated_ax:
+        bbox = ax.get_tightbbox(ax.figure.canvas.get_renderer())
+        ax.figure.canvas.blit(bbox)
+
+# MONKEY PATCH!!
+matplotlib.animation.Animation._blit_draw = _blit_draw
 
 
 class Plotter(object):
@@ -61,10 +91,17 @@ class Plotter(object):
         for seed_id in configuration.earthquake_viewer.seed_ids:
             ax = fig.add_subplot(gs[row, map_width:], sharex=lead_ax)
             ax.yaxis.tick_right()
-            ax.set_ylabel(seed_id, rotation="horizontal")
+            ax.yaxis.set_label_position("right")
+            ax.set_ylabel(seed_id, rotation="horizontal",
+                          horizontalalignment="left")
+            ax.set_yticks([])
             self.waveform_axes.update({seed_id: ax})
             if row == 0:
                 lead_ax = ax
+            if row != len(configuration.earthquake_viewer.seed_ids) - 1:
+                [label.set_visible(False) for label in ax.get_xticklabels()]
+            # else:
+            #     ax.xaxis.set_animated(True)
             row += 1
         fig.subplots_adjust(hspace=0)
         # Define properties
@@ -164,26 +201,46 @@ class Plotter(object):
     def update_waveforms(self):
         # Get data from buffers
         stream = self.streamer.stream.copy()
+        now = UTCDateTime.now()
         Logger.debug(stream)
+        updated_artists = []
         for tr in stream:
             seed_id = tr.id
             plot_lim = self._previous_plot_time[seed_id]
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
+            if self.config.plotting.lowcut and self.config.plotting.highcut:
+                tr = tr.split().detrend().filter(
+                    "bandpass", freqmin=self.config.plotting.lowcut,
+                    freqmax=self.config.plotting.highcut)
+            elif self.config.plotting.lowcut:
+                tr = tr.split().detrend().filter(
+                    "highpass", self.config.plotting.lowcut)
+            elif self.config.plotting.highcut:
+                tr = tr.split().detrend().filter(
+                    "lowpass", self.config.plotting.highcut)
+            tr = tr.merge()[0]
+            self._previous_plot_time.update({seed_id: tr.stats.endtime})
             times = tr.times("relative")
-            times -= times[-1]
-            times -= (UTCDateTime.now() - tr.stats.endtime)
-            self.waveform_lines[seed_id].set_data(times, tr.data)
-            self.waveform_axes[seed_id].set_ylim(tr.data.min(), tr.data.max())
+            data = tr.data
+            if isinstance(times, np.ma.MaskedArray):
+                times = times.data[~times.mask]
+                data = data.data[~data.mask]
+            # Convert to datetime
+            times = [(tr.stats.starttime + t).datetime for t in times]
+            # Update!
+            self.waveform_lines[seed_id].set_data(times, data)
+            self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
 
         # Update limit
         self.waveform_axes[self.config.earthquake_viewer.seed_ids[0]].set_xlim(
-            -1 * self.config.streaming.buffer_capacity, 0)
+            (now - self.config.streaming.buffer_capacity).datetime,
+            now.datetime)
 
-        return self.waveform_lines.values()
+        return self.waveform_axes.values()
 
     def update(self, *args, **kwargs):
-        Logger.info("Updating")
+        Logger.debug("Updating")
         artists = []
         artists.extend(self.update_waveforms())
         if self.map_ax:
@@ -193,7 +250,8 @@ class Plotter(object):
 
     def animate(self):
         animator = FuncAnimation(
-            fig=self.fig, func=self.update, interval=100, blit=True)
+            fig=self.fig, func=self.update,
+            interval=self.config.plotting.update_interval, blit=True)
         return animator
 
     def show(self, full_screen: bool = True):
@@ -202,6 +260,7 @@ class Plotter(object):
             self.fig.canvas.manager.full_screen_toggle()
         ani = self.animate()
         plt.show(block=True)
+
 
 
 if __name__ == "__main__":
