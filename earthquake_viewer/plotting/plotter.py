@@ -51,6 +51,7 @@ class Plotter(object):
                         {f"{network.code}.{station.code}":
                          (station.longitude, station.latitude)})
         else:
+            Logger.info("Map plotting disabled")
             self.map_ax, self._station_locations = None, None
             map_width = 0
             gs = fig.add_gridspec(
@@ -58,11 +59,14 @@ class Plotter(object):
         self.waveform_axes = {}
         row, lead_ax = 0, None
         for seed_id in configuration.earthquake_viewer.seed_ids:
-            self.waveform_axes.update({
-                seed_id: fig.add_subplot(gs[row, map_width:], sharex=lead_ax)})
+            ax = fig.add_subplot(gs[row, map_width:], sharex=lead_ax)
+            ax.yaxis.tick_right()
+            ax.set_ylabel(seed_id, rotation="horizontal")
+            self.waveform_axes.update({seed_id: ax})
             if row == 0:
-                lead_ax = self.waveform_axes[seed_id]
+                lead_ax = ax
             row += 1
+        fig.subplots_adjust(hspace=0)
         # Define properties
         self.fig = fig
         self.config = configuration
@@ -90,6 +94,7 @@ class Plotter(object):
             self._initialise_map()
         # Initialise empty waveforms
         for seed_id in self.config.earthquake_viewer.seed_ids:
+            Logger.info(f"Initialising for {seed_id}")
             ax = self.waveform_axes[seed_id]
             line = Line2D([0], [0], linewidth=1.0, color="k")
             ax.add_line(line)
@@ -102,15 +107,17 @@ class Plotter(object):
             self.map_ax.set_global()
             self.map_ax.stock_img()  # Plot a nice image on the globe
         else:
+            Logger.info(
+                f"Setting map extent to {self.config.plotting.map_bounds}")
             self.map_ax.set_extent(self.config.plotting.map_bounds,
                                    crs=ccrs.PlateCarree())
             self.map_ax.set_facecolor("white")  # oceans
             if self.config.plotting.latitude_range < 3:
                 resolution = "h"
-            elif self.config.plotting.latitude_range < 10:
+            elif self.config.plotting.latitude_range < 15:
                 resolution = "i"
             else:
-                resolution = "l'"
+                resolution = "l"
             coast = cfeature.GSHHSFeature(
                 scale=resolution, levels=[1], facecolor="lightgrey",
                 edgecolor="black")
@@ -120,7 +127,7 @@ class Plotter(object):
             self.map_ax.scatter(
                 [val[0] for val in self._station_locations.values()],
                 [val[1] for val in self._station_locations.values()],
-                marker="^", color="red",
+                marker="^", color="red", zorder=100,
                 transform=ccrs.PlateCarree())
             for station_name, location in self._station_locations.items():
                 self.map_ax.text(
@@ -157,35 +164,44 @@ class Plotter(object):
     def update_waveforms(self):
         # Get data from buffers
         stream = self.streamer.stream.copy()
+        Logger.debug(stream)
         for tr in stream:
             seed_id = tr.id
             plot_lim = self._previous_plot_time[seed_id]
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
-            self.waveform_lines.set_data(tr.times("matplotlib"), tr.data)
+            times = tr.times("relative")
+            times -= times[-1]
+            times -= (UTCDateTime.now() - tr.stats.endtime)
+            self.waveform_lines[seed_id].set_data(times, tr.data)
+            self.waveform_axes[seed_id].set_ylim(tr.data.min(), tr.data.max())
 
         # Update limit
+        self.waveform_axes[self.config.earthquake_viewer.seed_ids[0]].set_xlim(
+            -1 * self.config.streaming.buffer_capacity, 0)
 
-        return self.waveform_lines
+        return self.waveform_lines.values()
 
     def update(self, *args, **kwargs):
+        Logger.info("Updating")
         artists = []
         artists.extend(self.update_waveforms())
         if self.map_ax:
-            artists.extend(self.update_map())
-        # If using blitting (which should be faster!) then this needs to return an iterable of updated artists
+            pass
+            # artists.extend(self.update_map())
         return artists
 
     def animate(self):
         animator = FuncAnimation(
-            fig=self.fig, func=self.update, init_func=self.initialise_plot,
-            interval=1000, blit=True)
+            fig=self.fig, func=self.update, interval=100, blit=True)
         return animator
 
     def show(self, full_screen: bool = True):
+        self.initialise_plot()
         if full_screen:
             self.fig.canvas.manager.full_screen_toggle()
-        self.fig.show()
+        ani = self.animate()
+        plt.show(block=True)
 
 
 if __name__ == "__main__":

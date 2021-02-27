@@ -1,1 +1,5 @@
-__version__ = "0.0.1a"
+"""
+Earthquake Viewer
+"""
+
+__version__ = '0.0.1a'

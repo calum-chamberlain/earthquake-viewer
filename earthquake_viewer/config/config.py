@@ -64,7 +64,7 @@ class EarthquakeViewerConfig(_ConfigAttribDict):
 
     @property
     def n_chans(self):
-        return len(self.defaults)
+        return len(self.seed_ids)
 
 
 class PlottingConfig(_ConfigAttribDict):
@@ -146,10 +146,10 @@ class PlottingConfig(_ConfigAttribDict):
             return None
         return CatalogListener(
             client=self.get_client(), catalog_lookup_kwargs=dict(
-                min_latitude=self.map_bounds[2],
-                min_longitude=self.map_bounds[0],
-                max_latitude=self.map_bounds[3],
-                max_longitude=self.map_bounds[1]),
+                minlatitude=self.map_bounds[2],
+                minlongitude=self.map_bounds[0],
+                maxlatitude=self.map_bounds[3],
+                maxlongitude=self.map_bounds[1]),
             interval=self.map_update_interval, keep=self.event_history)
 
 
