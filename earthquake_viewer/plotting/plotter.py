@@ -203,7 +203,6 @@ class Plotter(object):
         stream = self.streamer.stream.copy()
         now = UTCDateTime.now()
         Logger.debug(stream)
-        updated_artists = []
         for tr in stream:
             seed_id = tr.id
             plot_lim = self._previous_plot_time[seed_id]
@@ -231,13 +230,16 @@ class Plotter(object):
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
             self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
+        updated_artists = list(self.waveform_lines.values())
 
         # Update limit
-        self.waveform_axes[self.config.earthquake_viewer.seed_ids[0]].set_xlim(
+        final_ax = self.waveform_axes[self.config.earthquake_viewer.seed_ids[-1]]
+        final_ax.set_xlim(
             (now - self.config.streaming.buffer_capacity).datetime,
             now.datetime)
+        updated_artists.append(final_ax)
 
-        return self.waveform_axes.values()
+        return updated_artists
 
     def update(self, *args, **kwargs):
         Logger.debug("Updating")

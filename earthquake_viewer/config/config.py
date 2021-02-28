@@ -71,8 +71,8 @@ class PlottingConfig(_ConfigAttribDict):
     defaults = {
         "figure_size": (10, 10),
         "lowcut": 1.0,
-        "highcut": 25.0,
-        "update_interval": 10,
+        "highcut": 15.0,
+        "update_interval": 50,
         "plot_map": True,
         "map_width_percent": 30,
         "map_client": "GEONET",
