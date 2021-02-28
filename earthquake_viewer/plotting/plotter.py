@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import logging
 import numpy as np
 import matplotlib
+import time
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
@@ -208,6 +209,7 @@ class Plotter(object):
             plot_lim = self._previous_plot_time[seed_id]
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
+            tic = time.time()
             if self.config.plotting.lowcut and self.config.plotting.highcut:
                 tr = tr.split().detrend().filter(
                     "bandpass", freqmin=self.config.plotting.lowcut,
@@ -219,35 +221,40 @@ class Plotter(object):
                 tr = tr.split().detrend().filter(
                     "lowpass", self.config.plotting.highcut)
             tr = tr.merge()[0]
+            toc = time.time()
+            Logger.debug(f"Filtering took {toc-tic:.3f}s")
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
-            times = tr.times("relative")
+            tic = time.time()
+            times = tr.times("matplotlib")
             data = tr.data
-            if isinstance(times, np.ma.MaskedArray):
-                times = times.data[~times.mask]
-                data = data.data[~data.mask]
-            # Convert to datetime
-            times = [(tr.stats.starttime + t).datetime for t in times]
+            toc = time.time()
+            Logger.debug(f"Getting times took {toc - tic:.3f}s")
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
             self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
         updated_artists = list(self.waveform_lines.values())
 
         # Update limit
-        final_ax = self.waveform_axes[self.config.earthquake_viewer.seed_ids[-1]]
+        final_ax = self.waveform_axes[
+            self.config.earthquake_viewer.seed_ids[-1]]
         final_ax.set_xlim(
             (now - self.config.streaming.buffer_capacity).datetime,
             now.datetime)
         updated_artists.append(final_ax)
 
-        return updated_artists
+        return self.waveform_axes.values()
+        # return updated_artists
 
     def update(self, *args, **kwargs):
         Logger.debug("Updating")
+        tic = time.time()
         artists = []
         artists.extend(self.update_waveforms())
         if self.map_ax:
             pass
             # artists.extend(self.update_map())
+        toc = time.time()
+        Logger.debug(f"Update took {toc - tic:.3f}")
         return artists
 
     def animate(self):
