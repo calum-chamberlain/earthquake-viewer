@@ -6,12 +6,14 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import logging
-import numpy as np
 import matplotlib
 import time
+import os
+import datetime as dt
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
+import matplotlib.dates as mdates
 from typing import Iterable
 from obspy import UTCDateTime
 
@@ -20,6 +22,7 @@ from earthquake_viewer.config.config import Config
 
 DEPTH_CMAP = "plasma_r"  # To do - make a normalized cmap and scale bar
 Logger = logging.getLogger(__name__)
+LOCALTZ = dt.datetime.now().astimezone().tzinfo
 
 
 def _scale_mags(magnitudes: Iterable) -> Iterable:
@@ -59,6 +62,13 @@ class Plotter(object):
         self,
         configuration: Config,
     ):
+        matplotlib.rcParams['toolbar'] = 'None'
+        try:
+            plt.style.use(configuration.plotting.style)
+        except:
+            plt.style.use(
+                os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             configuration.plotting.style))
         fig = plt.figure(figsize=configuration.plotting.figure_size)
         if configuration.plotting.plot_map:
             # Factorise the width to get a sensible number of columns
@@ -134,9 +144,18 @@ class Plotter(object):
         for seed_id in self.config.earthquake_viewer.seed_ids:
             Logger.info(f"Initialising for {seed_id}")
             ax = self.waveform_axes[seed_id]
-            line = Line2D([0], [0], linewidth=1.0, color="k")
+            line = Line2D([0], [0], linewidth=0.5)  #, color="k")
             ax.add_line(line)
             self.waveform_lines.update({seed_id: line})
+        final_ax = self.waveform_axes[
+            self.config.earthquake_viewer.seed_ids[-1]]
+        # Format ticks
+        # minutes = mdates.MinuteLocator(tz=LOCALTZ)
+        # seconds = mdates.SecondLocator(15, tz=LOCALTZ)
+        tickformat =mdates.DateFormatter("%H:%M", tz=LOCALTZ)
+        # final_ax.xaxis.set_major_locator(minutes)
+        final_ax.xaxis.set_major_formatter(tickformat)
+        # final_ax.xaxis.set_minor_locator(seconds)
         return self.fig
 
     def _initialise_map(self):
@@ -149,7 +168,7 @@ class Plotter(object):
                 f"Setting map extent to {self.config.plotting.map_bounds}")
             self.map_ax.set_extent(self.config.plotting.map_bounds,
                                    crs=ccrs.PlateCarree())
-            self.map_ax.set_facecolor("white")  # oceans
+            # self.map_ax.set_facecolor("white")  # oceans
             if self.config.plotting.latitude_range < 3:
                 resolution = "h"
             elif self.config.plotting.latitude_range < 15:
@@ -157,8 +176,8 @@ class Plotter(object):
             else:
                 resolution = "l"
             coast = cfeature.GSHHSFeature(
-                scale=resolution, levels=[1], facecolor="lightgrey",
-                edgecolor="black")
+                scale=resolution, levels=[1], facecolor="yellowgreen",
+                edgecolor="black", alpha=0.5)
             self.map_ax.add_feature(coast)
         self.map_ax.gridlines(draw_labels=True)
         if self._station_locations is not None:
@@ -201,8 +220,16 @@ class Plotter(object):
 
     def update_waveforms(self):
         # Get data from buffers
-        stream = self.streamer.stream.copy()
         now = UTCDateTime.now()
+        if not self.streamer.has_new_data:
+            final_ax = self.waveform_axes[
+                self.config.earthquake_viewer.seed_ids[-1]]
+            final_ax.set_xlim(
+                (now - self.config.streaming.buffer_capacity).datetime,
+                now.datetime)
+            return self.waveform_axes.values()
+        stream = self.streamer.stream.copy()
+
         Logger.debug(stream)
         for tr in stream:
             seed_id = tr.id
@@ -220,19 +247,20 @@ class Plotter(object):
             elif self.config.plotting.highcut:
                 tr = tr.split().detrend().filter(
                     "lowpass", self.config.plotting.highcut)
+            if self.config.plotting.decimate > 1:
+                tr = tr.split().decimate(self.config.plotting.decimate)
             tr = tr.merge()[0]
             toc = time.time()
-            Logger.debug(f"Filtering took {toc-tic:.3f}s")
+            Logger.info(f"Filtering took {toc-tic:.3f}s")
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
             tic = time.time()
             times = tr.times("matplotlib")
             data = tr.data
             toc = time.time()
-            Logger.debug(f"Getting times took {toc - tic:.3f}s")
+            Logger.info(f"Getting times took {toc - tic:.3f}s")
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
             self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
-        updated_artists = list(self.waveform_lines.values())
 
         # Update limit
         final_ax = self.waveform_axes[
@@ -240,10 +268,8 @@ class Plotter(object):
         final_ax.set_xlim(
             (now - self.config.streaming.buffer_capacity).datetime,
             now.datetime)
-        updated_artists.append(final_ax)
 
         return self.waveform_axes.values()
-        # return updated_artists
 
     def update(self, *args, **kwargs):
         Logger.debug("Updating")
@@ -254,7 +280,7 @@ class Plotter(object):
             pass
             # artists.extend(self.update_map())
         toc = time.time()
-        Logger.debug(f"Update took {toc - tic:.3f}")
+        Logger.info(f"Update took {toc - tic:.3f}")
         return artists
 
     def animate(self):

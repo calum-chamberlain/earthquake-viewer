@@ -52,9 +52,12 @@ class _ConfigAttribDict(AttribDict):
 
 class EarthquakeViewerConfig(_ConfigAttribDict):
     defaults = {
-        "seed_ids": ["NZ.WIZ.10.HHZ", "NZ.PUZ.10.HHZ", "NZ.RATZ.10.HHZ",
-                     "NZ.PXZ.10.HHZ", "NZ.WEL.10.HHZ", "NZ.INZ.10.HHZ",
-                     "NZ.JCZ.10.HHZ", "NZ.PYZ.10.HHZ"],
+        "seed_ids": ["NZ.WIZ.10.HHZ", "NZ.PUZ.10.HHZ", "NZ.OTVZ.10.HHZ",
+                     "NZ.PXZ.10.HHZ", "NZ.WEL.10.HHZ",
+                     "NZ.KHZ.10.HHZ",
+                     "NZ.INZ.10.HHZ",
+                     "NZ.MQZ.10.HHZ",
+                     "NZ.JCZ.10.HHZ", "NZ.OPZ.10.HHZ", "NZ.PYZ.10.HHZ"],
     }
 
     readonly = []
@@ -71,8 +74,10 @@ class PlottingConfig(_ConfigAttribDict):
     defaults = {
         "figure_size": (10, 10),
         "lowcut": 1.0,
-        "highcut": 15.0,
-        "update_interval": 200,
+        "highcut": 10.0,
+        "decimate": 1,
+        "style": "eqv.mplstyle",
+        "update_interval": 40,
         "plot_map": True,
         "map_width_percent": 30,
         "map_client": "GEONET",

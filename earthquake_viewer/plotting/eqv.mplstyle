@@ -1,0 +1,33 @@
+# Stylesheet for matplotlib
+# Earthquake Viewer style
+
+### Text
+text.color : D9D9D9
+font.size : 15
+font.family : sans-serif
+
+
+### Ticks
+xtick.color : D9D9D9
+ytick.color : D9D9D9
+
+### Axes
+axes.labelcolor : D9D9D9
+axes.edgecolor : D9D9D9
+axes.facecolor : 2D2B55
+axes.prop_cycle : cycler('color', ['B3FF31', 'F241A3', 'FA851E', 'BFD91A', 'D9D9D9', '1AA0D9', 'E62F53',  'FEED00'])
+
+
+### Lines
+lines.linewidth : 2.0
+
+### Figures
+figure.figsize : 15, 15
+figure.facecolor : 2D2B55
+
+### Legends
+legend.fancybox : False
+legend.frameon : False
+
+### Saving figures
+savefig.facecolor : 2D2B55

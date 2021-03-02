@@ -48,6 +48,7 @@ class _StreamingClient(ABC):
     busy = False
     started = False
     lock = threading.Lock()  # Lock for buffer access
+    has_new_data = True
 
     def __init__(
         self,
@@ -158,6 +159,7 @@ class _StreamingClient(ABC):
             stream = self.buffer.stream
         Logger.debug(
             f"Finished getting the data: Lock status: {self.lock.locked()}")
+        self.has_new_data = False
         return stream
 
     def _bg_run(self):
@@ -204,6 +206,7 @@ class _StreamingClient(ABC):
             trace.data = trace.data.astype(np.int32)
         Logger.debug("Buffer contains {0}".format(self.buffer))
         Logger.debug(f"Finished adding data: Lock status: {self.lock.locked()}")
+        self.has_new_data = True
 
     def on_terminate(self) -> Stream:  # pragma: no cover
         """
