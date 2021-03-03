@@ -11,9 +11,12 @@ import time
 import os
 import datetime as dt
 import numpy as np
+import copy
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
+from matplotlib import cm
+from matplotlib.colors import Normalize
 import matplotlib.dates as mdates
 import matplotlib.table as mpltable
 from typing import Iterable
@@ -22,7 +25,9 @@ from obspy import UTCDateTime
 from earthquake_viewer.config.config import Config
 
 
-DEPTH_CMAP = "plasma_r"  # To do - make a normalized cmap and scale bar
+DEPTH_CMAP = copy.copy(cm.get_cmap("plasma_r"))  # To do - make a normalized cmap and scale bar
+NORM = Normalize(vmin=0, vmax=100.0)
+DEPTH_CMAP.set_over("k")
 Logger = logging.getLogger(__name__)
 LOCALTZ = dt.datetime.now().astimezone().tzinfo
 
@@ -80,12 +85,12 @@ class Plotter(object):
                 configuration.plotting.map_width_percent // largest_factor)
             # Set up gs for this
             gs = fig.add_gridspec(
-                nrows=2,  # configuration.earthquake_viewer.n_chans,
+                nrows=7,  # configuration.earthquake_viewer.n_chans,
                 ncols=ncols)
             self.map_ax = fig.add_subplot(
-                gs[0, 0:map_width],
+                gs[0:5, 0:map_width],
                 projection=configuration.plotting.map_projection)
-            self.table_ax = fig.add_subplot(gs[1, 0:map_width])
+            self.table_ax = fig.add_subplot(gs[5:, 0:map_width])
             self.table_ax.set_axis_off()
             self.event_table = mpltable.table(
                 ax=self.table_ax, loc="center",
@@ -219,7 +224,9 @@ class Plotter(object):
                     horizontalalignment='right',
                     verticalalignment="bottom", transform=ccrs.PlateCarree())
         # Make an empty scatter artist
-
+        self.map_scatters = self.map_ax.scatter(
+            [], [], s=[], c=[], transform=ccrs.PlateCarree(),
+            cmap=DEPTH_CMAP)
         # Magnitude scale
 
         # Colorbar
@@ -229,31 +236,29 @@ class Plotter(object):
 
     def update_map(self):
         """ Get new events and plot. """
+        now = UTCDateTime.now()
+        if len(self.listener.old_events) == 0:
+            return []
         listener_events = self.listener.old_events
-        new_events = [ev for ev in listener_events
-                      if ev.event_id not in self._plotted_event_ids]
         # Plot the new events!
-        lats = [ev.latitude for ev in new_events]
-        lons = [ev.longitude for ev in new_events]
-        depths = [ev.depth for ev in new_events]
-        mags = [ev.magnitude for ev in new_events]
+        positions = [(ev.longitude, ev.latitude) for ev in listener_events]
+        depths = np.array([ev.depth for ev in listener_events]) / 1000.0
+        colors = [DEPTH_CMAP(NORM(d)) for d in depths]
+        mags = np.array([ev.magnitude for ev in listener_events])
+        times = np.array([now - ev.time for ev in listener_events])
+        alphas = times / self.config.plotting.event_history
         # Update the content of the artist!
-
-        # Update alpha of old events?
-
-        # Remove very old events.
-
-        return self.map_scatters
+        print(positions)
+        self.map_scatters.set_offsets(positions)
+        self.map_scatters.set_sizes(mags ** 3)
+        self.map_scatters.set_facecolors(colors)
+        self.map_scatters.set_alpha(alphas)
+        return [self.map_scatters]
 
     def update_waveforms(self):
         # Get data from buffers
         now = UTCDateTime.now()
         if not self.streamer.has_new_data:
-            # final_ax = self.waveform_axes[
-            #     self.config.earthquake_viewer.seed_ids[-1]]
-            # final_ax.set_xlim(
-            #     (now - self.config.streaming.buffer_capacity).datetime,
-            #     now.datetime)
             self.waveform_axes.set_xlim(
                 (now - self.config.streaming.buffer_capacity).datetime,
                 now.datetime)
@@ -281,13 +286,13 @@ class Plotter(object):
                 tr = tr.split().decimate(self.config.plotting.decimate)
             tr = tr.merge()[0]
             toc = time.time()
-            Logger.info(f"Filtering took {toc-tic:.3f}s")
+            # Logger.info(f"Filtering took {toc-tic:.3f}s")
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
             tic = time.time()
             times = tr.times("matplotlib")
             data = tr.data
             toc = time.time()
-            Logger.info(f"Getting times took {toc - tic:.3f}s")
+            # Logger.info(f"Getting times took {toc - tic:.3f}s")
 
             # Normalize and offset
             data /= 2.5 * np.abs(data).max()
@@ -295,11 +300,7 @@ class Plotter(object):
 
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
-            # self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
 
-        # Update limit
-        # final_ax = self.waveform_axes[
-        #     self.config.earthquake_viewer.seed_ids[-1]]
         self.waveform_axes.set_xlim(
             (now - self.config.streaming.buffer_capacity).datetime,
             now.datetime)
@@ -307,15 +308,15 @@ class Plotter(object):
         return [self.waveform_axes]
 
     def update(self, *args, **kwargs):
-        Logger.debug("Updating")
+        # Logger.debug("Updating")
         tic = time.time()
         artists = []
         artists.extend(self.update_waveforms())
         if self.map_ax:
-            pass
-            # artists.extend(self.update_map())
+            # pass
+            artists.extend(self.update_map())
         toc = time.time()
-        Logger.info(f"Update took {toc - tic:.3f}")
+        # Logger.debug(f"Update took {toc - tic:.3f}")
         return artists
 
     def animate(self):
