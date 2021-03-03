@@ -10,10 +10,12 @@ import matplotlib
 import time
 import os
 import datetime as dt
+import numpy as np
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
 import matplotlib.dates as mdates
+import matplotlib.table as mpltable
 from typing import Iterable
 from obspy import UTCDateTime
 
@@ -78,11 +80,23 @@ class Plotter(object):
                 configuration.plotting.map_width_percent // largest_factor)
             # Set up gs for this
             gs = fig.add_gridspec(
-                nrows=configuration.earthquake_viewer.n_chans,
+                nrows=2,  # configuration.earthquake_viewer.n_chans,
                 ncols=ncols)
             self.map_ax = fig.add_subplot(
-                gs[:, 0:map_width],
+                gs[0, 0:map_width],
                 projection=configuration.plotting.map_projection)
+            self.table_ax = fig.add_subplot(gs[1, 0:map_width])
+            self.table_ax.set_axis_off()
+            self.event_table = mpltable.table(
+                ax=self.table_ax, loc="center",
+                colLabels=["Origin-Time (UTC)", "Latitude", "Longitude",
+                           "Depth (km)", "Magnitude"],
+                cellText=[
+                    [None, None, None, None, None],
+                    [None, None, None, None, None],
+                    [None, None, None, None, None],
+                    [None, None, None, None, None],
+                    [None, None, None, None, None]])
             # Get the locations of stations
             inv = configuration.get_inventory(level="station")
             self._station_locations = dict()
@@ -95,25 +109,33 @@ class Plotter(object):
             Logger.info("Map plotting disabled")
             self.map_ax, self._station_locations = None, None
             map_width = 0
-            gs = fig.add_gridspec(
-                nrows=configuration.earthquake_viewer.n_chans, ncols=1)
-        self.waveform_axes = {}
-        row, lead_ax = 0, None
-        for seed_id in configuration.earthquake_viewer.seed_ids:
-            ax = fig.add_subplot(gs[row, map_width:], sharex=lead_ax)
-            ax.yaxis.tick_right()
-            ax.yaxis.set_label_position("right")
-            ax.set_ylabel(seed_id, rotation="horizontal",
-                          horizontalalignment="left")
-            ax.set_yticks([])
-            self.waveform_axes.update({seed_id: ax})
-            if row == 0:
-                lead_ax = ax
-            if row != len(configuration.earthquake_viewer.seed_ids) - 1:
-                [label.set_visible(False) for label in ax.get_xticklabels()]
-            # else:
-            #     ax.xaxis.set_animated(True)
-            row += 1
+            gs = fig.add_gridspec(nrows=1, ncols=1)
+                # nrows=configuration.earthquake_viewer.n_chans, ncols=1)
+        self.waveform_axes = fig.add_subplot(gs[:, map_width:])
+        self.waveform_axes.yaxis.tick_right()
+        self.waveform_axes.yaxis.set_label_position("right")
+        ticks, labels = zip(*[(i, seed_id) for i, seed_id in enumerate(
+            configuration.earthquake_viewer.seed_ids)])
+        self.waveform_axes.set_yticks(ticks)
+        self.waveform_axes.set_yticklabels(labels)
+        self._data_offsets = {label: tick for tick, label in zip(ticks, labels)}
+        # self.waveform_axes = {}
+        # row, lead_ax = 0, None
+        # for seed_id in configuration.earthquake_viewer.seed_ids:
+        #     ax = fig.add_subplot(gs[row, map_width:], sharex=lead_ax)
+        #     ax.yaxis.tick_right()
+        #     ax.yaxis.set_label_position("right")
+        #     ax.set_ylabel(seed_id, rotation="horizontal",
+        #                   horizontalalignment="left")
+        #     ax.set_yticks([])
+        #     self.waveform_axes.update({seed_id: ax})
+        #     if row == 0:
+        #         lead_ax = ax
+        #     if row != len(configuration.earthquake_viewer.seed_ids) - 1:
+        #         [label.set_visible(False) for label in ax.get_xticklabels()]
+        #     # else:
+        #     #     ax.xaxis.set_animated(True)
+        #     row += 1
         fig.subplots_adjust(hspace=0)
         # Define properties
         self.fig = fig
@@ -124,10 +146,12 @@ class Plotter(object):
                 UTCDateTime.now() - self.config.plotting.event_history)
         self._plotted_event_ids = list()
         self._previous_plot_time = {
-            key: UTCDateTime(1970, 1, 1) for key in self.waveform_axes.keys()}
+            key: UTCDateTime(1970, 1, 1)
+            for key in self.config.earthquake_viewer.seed_ids}
         # Define artists
         self.map_scatters = None
-        self.waveform_lines = {key: None for key in self.waveform_axes.keys()}
+        self.waveform_lines = {
+            key: None for key in self.config.earthquake_viewer.seed_ids}
         # Start background services
         if not self.listener.busy:
             Logger.info("Starting event listening service")
@@ -141,20 +165,23 @@ class Plotter(object):
         if self.map_ax:
             self._initialise_map()
         # Initialise empty waveforms
-        for seed_id in self.config.earthquake_viewer.seed_ids:
+        for i, seed_id in enumerate(self.config.earthquake_viewer.seed_ids):
             Logger.info(f"Initialising for {seed_id}")
-            ax = self.waveform_axes[seed_id]
-            line = Line2D([0], [0], linewidth=0.5)  #, color="k")
-            ax.add_line(line)
+            # ax = self.waveform_axes[seed_id]
+            line = Line2D([0], [i], linewidth=0.5)  #, color="k")
+            self.waveform_axes.add_line(line)
             self.waveform_lines.update({seed_id: line})
-        final_ax = self.waveform_axes[
-            self.config.earthquake_viewer.seed_ids[-1]]
+        self.waveform_axes.set_ylim(
+            -0.5, len(self.config.earthquake_viewer.seed_ids) -.5)
+        self.waveform_axes.grid(True)
+        # final_ax = self.waveform_axes[
+        #     self.config.earthquake_viewer.seed_ids[-1]]
         # Format ticks
         # minutes = mdates.MinuteLocator(tz=LOCALTZ)
         # seconds = mdates.SecondLocator(15, tz=LOCALTZ)
-        tickformat =mdates.DateFormatter("%H:%M", tz=LOCALTZ)
+        tickformat = mdates.DateFormatter("%H:%M", tz=LOCALTZ)
         # final_ax.xaxis.set_major_locator(minutes)
-        final_ax.xaxis.set_major_formatter(tickformat)
+        self.waveform_axes.xaxis.set_major_formatter(tickformat)
         # final_ax.xaxis.set_minor_locator(seconds)
         return self.fig
 
@@ -222,12 +249,15 @@ class Plotter(object):
         # Get data from buffers
         now = UTCDateTime.now()
         if not self.streamer.has_new_data:
-            final_ax = self.waveform_axes[
-                self.config.earthquake_viewer.seed_ids[-1]]
-            final_ax.set_xlim(
+            # final_ax = self.waveform_axes[
+            #     self.config.earthquake_viewer.seed_ids[-1]]
+            # final_ax.set_xlim(
+            #     (now - self.config.streaming.buffer_capacity).datetime,
+            #     now.datetime)
+            self.waveform_axes.set_xlim(
                 (now - self.config.streaming.buffer_capacity).datetime,
                 now.datetime)
-            return self.waveform_axes.values()
+            return [self.waveform_axes]
         stream = self.streamer.stream.copy()
 
         Logger.debug(stream)
@@ -258,18 +288,23 @@ class Plotter(object):
             data = tr.data
             toc = time.time()
             Logger.info(f"Getting times took {toc - tic:.3f}s")
+
+            # Normalize and offset
+            data /= 2.5 * np.abs(data).max()
+            data += self._data_offsets[seed_id]
+
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
-            self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
+            # self.waveform_axes[seed_id].set_ylim(data.min(), data.max())
 
         # Update limit
-        final_ax = self.waveform_axes[
-            self.config.earthquake_viewer.seed_ids[-1]]
-        final_ax.set_xlim(
+        # final_ax = self.waveform_axes[
+        #     self.config.earthquake_viewer.seed_ids[-1]]
+        self.waveform_axes.set_xlim(
             (now - self.config.streaming.buffer_capacity).datetime,
             now.datetime)
 
-        return self.waveform_axes.values()
+        return [self.waveform_axes]
 
     def update(self, *args, **kwargs):
         Logger.debug("Updating")
