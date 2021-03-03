@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover
     from yaml import Loader, Dumper
 from logging.handlers import RotatingFileHandler
 
+from obspy import UTCDateTime
 from obspy.core.util import AttribDict
 from obspy.core.inventory import Inventory
 
@@ -147,16 +148,34 @@ class PlottingConfig(_ConfigAttribDict):
             central_latitude=self.map_bounds[2] + 0.5 * self.latitude_range,
             standard_parallels=[self.map_bounds[2], self.map_bounds[3]])
 
-    def get_listener(self) -> CatalogListener:
+    def get_listener(self, populate: bool = True) -> CatalogListener:
+        """
+        Get the listener service
+
+        Parameters
+        ----------
+        populate
+            Whether to populate the listener with old events or not
+        """
         if not self.plot_map:
             return None
+        client = self.get_client()
+        catalog_lookup_kwargs = dict(
+            minlatitude=self.map_bounds[2],
+            minlongitude=self.map_bounds[0],
+            maxlatitude=self.map_bounds[3],
+            maxlongitude=self.map_bounds[1])
+        if populate:
+            now = UTCDateTime.now()
+            catalog = client.get_events(
+                starttime=now - self.event_history, endtime=now,
+                **catalog_lookup_kwargs)
+        else:
+            catalog = None
         return CatalogListener(
-            client=self.get_client(), catalog_lookup_kwargs=dict(
-                minlatitude=self.map_bounds[2],
-                minlongitude=self.map_bounds[0],
-                maxlatitude=self.map_bounds[3],
-                maxlongitude=self.map_bounds[1]),
-            interval=self.map_update_interval, keep=self.event_history)
+            client=client, catalog_lookup_kwargs=catalog_lookup_kwargs,
+            interval=self.map_update_interval, keep=self.event_history,
+            catalog=catalog)
 
 
 class StreamingConfig(_ConfigAttribDict):

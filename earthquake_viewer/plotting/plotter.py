@@ -17,8 +17,10 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
 from matplotlib import cm
 from matplotlib.colors import Normalize
+from matplotlib.colorbar import ColorbarBase
 import matplotlib.dates as mdates
 import matplotlib.table as mpltable
+
 from typing import Iterable
 from obspy import UTCDateTime
 
@@ -85,12 +87,13 @@ class Plotter(object):
                 configuration.plotting.map_width_percent // largest_factor)
             # Set up gs for this
             gs = fig.add_gridspec(
-                nrows=7,  # configuration.earthquake_viewer.n_chans,
+                nrows=14,  # configuration.earthquake_viewer.n_chans,
                 ncols=ncols)
             self.map_ax = fig.add_subplot(
-                gs[0:5, 0:map_width],
+                gs[0:10, 0:map_width],
                 projection=configuration.plotting.map_projection)
-            self.table_ax = fig.add_subplot(gs[5:, 0:map_width])
+            self.cbar_ax = fig.add_subplot(gs[10, 0:map_width])
+            self.table_ax = fig.add_subplot(gs[12:, 0:map_width])
             self.table_ax.set_axis_off()
             self.event_table = mpltable.table(
                 ax=self.table_ax, loc="center",
@@ -115,7 +118,6 @@ class Plotter(object):
             self.map_ax, self._station_locations = None, None
             map_width = 0
             gs = fig.add_gridspec(nrows=1, ncols=1)
-                # nrows=configuration.earthquake_viewer.n_chans, ncols=1)
         self.waveform_axes = fig.add_subplot(gs[:, map_width:])
         self.waveform_axes.yaxis.tick_right()
         self.waveform_axes.yaxis.set_label_position("right")
@@ -124,23 +126,6 @@ class Plotter(object):
         self.waveform_axes.set_yticks(ticks)
         self.waveform_axes.set_yticklabels(labels)
         self._data_offsets = {label: tick for tick, label in zip(ticks, labels)}
-        # self.waveform_axes = {}
-        # row, lead_ax = 0, None
-        # for seed_id in configuration.earthquake_viewer.seed_ids:
-        #     ax = fig.add_subplot(gs[row, map_width:], sharex=lead_ax)
-        #     ax.yaxis.tick_right()
-        #     ax.yaxis.set_label_position("right")
-        #     ax.set_ylabel(seed_id, rotation="horizontal",
-        #                   horizontalalignment="left")
-        #     ax.set_yticks([])
-        #     self.waveform_axes.update({seed_id: ax})
-        #     if row == 0:
-        #         lead_ax = ax
-        #     if row != len(configuration.earthquake_viewer.seed_ids) - 1:
-        #         [label.set_visible(False) for label in ax.get_xticklabels()]
-        #     # else:
-        #     #     ax.xaxis.set_animated(True)
-        #     row += 1
         fig.subplots_adjust(hspace=0)
         # Define properties
         self.fig = fig
@@ -172,22 +157,14 @@ class Plotter(object):
         # Initialise empty waveforms
         for i, seed_id in enumerate(self.config.earthquake_viewer.seed_ids):
             Logger.info(f"Initialising for {seed_id}")
-            # ax = self.waveform_axes[seed_id]
             line = Line2D([0], [i], linewidth=0.5)  #, color="k")
             self.waveform_axes.add_line(line)
             self.waveform_lines.update({seed_id: line})
         self.waveform_axes.set_ylim(
             -0.5, len(self.config.earthquake_viewer.seed_ids) -.5)
         self.waveform_axes.grid(True)
-        # final_ax = self.waveform_axes[
-        #     self.config.earthquake_viewer.seed_ids[-1]]
-        # Format ticks
-        # minutes = mdates.MinuteLocator(tz=LOCALTZ)
-        # seconds = mdates.SecondLocator(15, tz=LOCALTZ)
         tickformat = mdates.DateFormatter("%H:%M", tz=LOCALTZ)
-        # final_ax.xaxis.set_major_locator(minutes)
         self.waveform_axes.xaxis.set_major_formatter(tickformat)
-        # final_ax.xaxis.set_minor_locator(seconds)
         return self.fig
 
     def _initialise_map(self):
@@ -200,7 +177,7 @@ class Plotter(object):
                 f"Setting map extent to {self.config.plotting.map_bounds}")
             self.map_ax.set_extent(self.config.plotting.map_bounds,
                                    crs=ccrs.PlateCarree())
-            # self.map_ax.set_facecolor("white")  # oceans
+            self.map_ax.set_facecolor("lightsteelblue")  # oceans
             if self.config.plotting.latitude_range < 3:
                 resolution = "h"
             elif self.config.plotting.latitude_range < 15:
@@ -209,9 +186,10 @@ class Plotter(object):
                 resolution = "l"
             coast = cfeature.GSHHSFeature(
                 scale=resolution, levels=[1], facecolor="yellowgreen",
-                edgecolor="black", alpha=0.5)
+                edgecolor="black", alpha=1.0)
             self.map_ax.add_feature(coast)
-        self.map_ax.gridlines(draw_labels=True)
+        gl = self.map_ax.gridlines(draw_labels=True)
+        gl.right_labels = False
         if self._station_locations is not None:
             self.map_ax.scatter(
                 [val[0] for val in self._station_locations.values()],
@@ -230,8 +208,11 @@ class Plotter(object):
         # Magnitude scale
 
         # Colorbar
-
-
+        cb = ColorbarBase(
+            self.cbar_ax, norm=NORM, cmap=DEPTH_CMAP, orientation='horizontal')
+        cb.set_label("Depth (km)")
+        if hasattr(cb, "update_ticks"):
+            cb.update_ticks()
         return
 
     def update_map(self):
@@ -243,16 +224,14 @@ class Plotter(object):
         # Plot the new events!
         positions = [(ev.longitude, ev.latitude) for ev in listener_events]
         depths = np.array([ev.depth for ev in listener_events]) / 1000.0
-        colors = [DEPTH_CMAP(NORM(d)) for d in depths]
         mags = np.array([ev.magnitude for ev in listener_events])
         times = np.array([now - ev.time for ev in listener_events])
         alphas = times / self.config.plotting.event_history
+        colors = [DEPTH_CMAP(NORM(d), alpha=a) for a, d in zip(alphas, depths)]
         # Update the content of the artist!
-        print(positions)
         self.map_scatters.set_offsets(positions)
         self.map_scatters.set_sizes(mags ** 3)
         self.map_scatters.set_facecolors(colors)
-        self.map_scatters.set_alpha(alphas)
         return [self.map_scatters]
 
     def update_waveforms(self):
