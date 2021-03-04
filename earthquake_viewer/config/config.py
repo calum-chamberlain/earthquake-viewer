@@ -86,6 +86,7 @@ class PlottingConfig(_ConfigAttribDict):
         "map_update_interval": 120,
         "map_bounds": (165.96, 180, -47.23, -34.54),
         "event_history": 86400 * 2,
+        "label_stations": True,
     }
     readonly = []
 
