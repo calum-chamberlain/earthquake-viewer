@@ -281,7 +281,7 @@ class CatalogListener(_Listener):
                 toc = time.time()  # Timer for loop, used in synthesising speed-ups
                 loop_duration = toc - tic
                 continue
-            if new_events is not None:
+            if new_events is not None and len(new_events) > 0:
                 if filter_func is not None:
                     new_events = filter_func(
                         new_events, min_stations=min_stations,

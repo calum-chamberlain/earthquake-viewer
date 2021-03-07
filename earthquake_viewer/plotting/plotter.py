@@ -7,7 +7,6 @@ import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import logging
 import matplotlib
-import time
 import os
 import datetime as dt
 import numpy as np
@@ -20,6 +19,7 @@ from matplotlib.colors import Normalize
 from matplotlib.colorbar import ColorbarBase
 import matplotlib.dates as mdates
 import matplotlib.table as mpltable
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from typing import Iterable
 from obspy import UTCDateTime
@@ -87,13 +87,15 @@ class Plotter(object):
                 configuration.plotting.map_width_percent // largest_factor)
             # Set up gs for this
             gs = fig.add_gridspec(
-                nrows=14,  # configuration.earthquake_viewer.n_chans,
+                nrows=10,  # configuration.earthquake_viewer.n_chans,
                 ncols=ncols)
             self.map_ax = fig.add_subplot(
-                gs[0:10, 0:map_width],
+                gs[0:8, 0:map_width],
                 projection=configuration.plotting.map_projection)
-            self.cbar_ax = fig.add_subplot(gs[10, 0:map_width])
-            self.table_ax = fig.add_subplot(gs[12:, 0:map_width])
+            divider = make_axes_locatable(self.map_ax)
+            self.cbar_ax = divider.append_axes(
+                position="bottom", size='5%', pad=0.05, axes_class=plt.Axes)
+            self.table_ax = fig.add_subplot(gs[8:, 0:map_width])
             self.table_ax.set_axis_off()
             self.event_table = mpltable.table(
                 ax=self.table_ax, loc="center",
@@ -122,7 +124,7 @@ class Plotter(object):
         self.waveform_axes.yaxis.tick_right()
         self.waveform_axes.yaxis.set_label_position("right")
         ticks, labels = zip(*[(i, seed_id) for i, seed_id in enumerate(
-            configuration.earthquake_viewer.seed_ids)])
+            reversed(configuration.earthquake_viewer.seed_ids))])
         self.waveform_axes.set_yticks(ticks)
         self.waveform_axes.set_yticklabels(labels)
         self._data_offsets = {label: tick for tick, label in zip(ticks, labels)}
@@ -155,7 +157,7 @@ class Plotter(object):
         if self.map_ax:
             self._initialise_map()
         # Initialise empty waveforms
-        for i, seed_id in enumerate(self.config.earthquake_viewer.seed_ids):
+        for i, seed_id in enumerate(reversed(self.config.earthquake_viewer.seed_ids)):
             Logger.info(f"Initialising for {seed_id}")
             line = Line2D([0], [i], linewidth=0.5)  #, color="k")
             self.waveform_axes.add_line(line)
@@ -190,17 +192,19 @@ class Plotter(object):
             self.map_ax.add_feature(coast)
         gl = self.map_ax.gridlines(draw_labels=True)
         gl.right_labels = False
+        gl.bottom_labels = False
         if self._station_locations is not None:
             self.map_ax.scatter(
                 [val[0] for val in self._station_locations.values()],
                 [val[1] for val in self._station_locations.values()],
                 marker="^", color="red", zorder=100,
                 transform=ccrs.PlateCarree())
-            for station_name, location in self._station_locations.items():
-                self.map_ax.text(
-                    location[0], location[1], station_name,
-                    horizontalalignment='right',
-                    verticalalignment="bottom", transform=ccrs.PlateCarree())
+            if self.config.plotting.label_stations:
+                for station_name, location in self._station_locations.items():
+                    self.map_ax.text(
+                        location[0], location[1], station_name,
+                        horizontalalignment='right',
+                        verticalalignment="bottom", transform=ccrs.PlateCarree())
         # Make an empty scatter artist
         self.map_scatters = self.map_ax.scatter(
             [], [], s=[], facecolors=[], edgecolors="k",
@@ -226,7 +230,7 @@ class Plotter(object):
         depths = np.array([ev.depth for ev in listener_events]) / 1000.0
         mags = np.array([ev.magnitude for ev in listener_events])
         times = np.array([now - ev.time for ev in listener_events])
-        alphas = times / self.config.plotting.event_history
+        alphas = 1 - (times / self.config.plotting.event_history)
         colors = [DEPTH_CMAP(NORM(d), alpha=a) for a, d in zip(alphas, depths)]
         # Update the content of the artist!
         self.map_scatters.set_offsets(positions)
@@ -244,34 +248,27 @@ class Plotter(object):
             return [self.waveform_axes]
         stream = self.streamer.stream.copy()
 
-        Logger.debug(stream)
         for tr in stream:
             seed_id = tr.id
             plot_lim = self._previous_plot_time[seed_id]
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
-            tic = time.time()
             if self.config.plotting.lowcut and self.config.plotting.highcut:
-                tr = tr.split().detrend().filter(
+                tr = tr.split().detrend().taper(0.05).filter(
                     "bandpass", freqmin=self.config.plotting.lowcut,
                     freqmax=self.config.plotting.highcut)
             elif self.config.plotting.lowcut:
-                tr = tr.split().detrend().filter(
+                tr = tr.split().detrend().taper(0.05).filter(
                     "highpass", self.config.plotting.lowcut)
             elif self.config.plotting.highcut:
-                tr = tr.split().detrend().filter(
+                tr = tr.split().detrend().taper(0.05).filter(
                     "lowpass", self.config.plotting.highcut)
             if self.config.plotting.decimate > 1:
                 tr = tr.split().decimate(self.config.plotting.decimate)
             tr = tr.merge()[0]
-            toc = time.time()
-            # Logger.info(f"Filtering took {toc-tic:.3f}s")
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
-            tic = time.time()
             times = tr.times("matplotlib")
             data = tr.data
-            toc = time.time()
-            # Logger.info(f"Getting times took {toc - tic:.3f}s")
 
             # Normalize and offset
             data /= 2.5 * np.abs(data).max()
@@ -287,15 +284,11 @@ class Plotter(object):
         return [self.waveform_axes]
 
     def update(self, *args, **kwargs):
-        # Logger.debug("Updating")
-        tic = time.time()
         artists = []
         artists.extend(self.update_waveforms())
         if self.map_ax:
             # pass
             artists.extend(self.update_map())
-        toc = time.time()
-        # Logger.debug(f"Update took {toc - tic:.3f}")
         return artists
 
     def animate(self):
