@@ -177,7 +177,7 @@ class Plotter(object):
                 f"Setting map extent to {self.config.plotting.map_bounds}")
             self.map_ax.set_extent(self.config.plotting.map_bounds,
                                    crs=ccrs.PlateCarree())
-            self.map_ax.set_facecolor("lightsteelblue")  # oceans
+            self.map_ax.set_facecolor("white")  # oceans
             if self.config.plotting.latitude_range < 3:
                 resolution = "h"
             elif self.config.plotting.latitude_range < 15:
@@ -185,8 +185,8 @@ class Plotter(object):
             else:
                 resolution = "l"
             coast = cfeature.GSHHSFeature(
-                scale=resolution, levels=[1], facecolor="yellowgreen",
-                edgecolor="black", alpha=1.0)
+                scale=resolution, levels=[1], facecolor="lightgrey",
+                edgecolor=None, alpha=1.0)
             self.map_ax.add_feature(coast)
         gl = self.map_ax.gridlines(draw_labels=True)
         gl.right_labels = False
@@ -203,8 +203,8 @@ class Plotter(object):
                     verticalalignment="bottom", transform=ccrs.PlateCarree())
         # Make an empty scatter artist
         self.map_scatters = self.map_ax.scatter(
-            [], [], s=[], c=[], transform=ccrs.PlateCarree(),
-            cmap=DEPTH_CMAP)
+            [], [], s=[], facecolors=[], edgecolors="k",
+            transform=ccrs.PlateCarree(), cmap=DEPTH_CMAP)
         # Magnitude scale
 
         # Colorbar
