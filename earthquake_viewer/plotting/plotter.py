@@ -7,7 +7,6 @@ import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import logging
 import matplotlib
-import time
 import os
 import datetime as dt
 import numpy as np
@@ -20,6 +19,7 @@ from matplotlib.colors import Normalize
 from matplotlib.colorbar import ColorbarBase
 import matplotlib.dates as mdates
 import matplotlib.table as mpltable
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from typing import Iterable
 from obspy import UTCDateTime
@@ -87,13 +87,15 @@ class Plotter(object):
                 configuration.plotting.map_width_percent // largest_factor)
             # Set up gs for this
             gs = fig.add_gridspec(
-                nrows=14,  # configuration.earthquake_viewer.n_chans,
+                nrows=10,  # configuration.earthquake_viewer.n_chans,
                 ncols=ncols)
             self.map_ax = fig.add_subplot(
-                gs[0:10, 0:map_width],
+                gs[0:8, 0:map_width],
                 projection=configuration.plotting.map_projection)
-            self.cbar_ax = fig.add_subplot(gs[10, 0:map_width])
-            self.table_ax = fig.add_subplot(gs[12:, 0:map_width])
+            divider = make_axes_locatable(self.map_ax)
+            self.cbar_ax = divider.append_axes(
+                position="bottom", size='5%', pad=0.05, axes_class=plt.Axes)
+            self.table_ax = fig.add_subplot(gs[8:, 0:map_width])
             self.table_ax.set_axis_off()
             self.event_table = mpltable.table(
                 ax=self.table_ax, loc="center",
@@ -190,6 +192,7 @@ class Plotter(object):
             self.map_ax.add_feature(coast)
         gl = self.map_ax.gridlines(draw_labels=True)
         gl.right_labels = False
+        gl.bottom_labels = False
         if self._station_locations is not None:
             self.map_ax.scatter(
                 [val[0] for val in self._station_locations.values()],
