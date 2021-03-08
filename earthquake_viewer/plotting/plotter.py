@@ -92,6 +92,8 @@ class Plotter(object):
             self.map_ax = fig.add_subplot(
                 gs[0:8, 0:map_width],
                 projection=configuration.plotting.map_projection)
+            for spine in self.map_ax.spines.values():
+                spine.set_edgecolor('black')
             divider = make_axes_locatable(self.map_ax)
             self.cbar_ax = divider.append_axes(
                 position="bottom", size='5%', pad=0.05, axes_class=plt.Axes)
@@ -99,14 +101,11 @@ class Plotter(object):
             self.table_ax.set_axis_off()
             self.event_table = mpltable.table(
                 ax=self.table_ax, loc="center",
-                colLabels=["Origin-Time (UTC)", "Latitude", "Longitude",
+                colLabels=["Origin-Time", "Latitude", "Longitude",
                            "Depth (km)", "Magnitude"],
-                cellText=[
-                    [None, None, None, None, None],
-                    [None, None, None, None, None],
-                    [None, None, None, None, None],
-                    [None, None, None, None, None],
-                    [None, None, None, None, None]])
+                cellText=[[None, None, None, None, None] for _ in range(10)])
+            self.event_table.auto_set_font_size(False)
+            self.event_table.set_fontsize(10)
             # Get the locations of stations
             inv = configuration.get_inventory(level="station")
             self._station_locations = dict()
@@ -190,7 +189,7 @@ class Plotter(object):
                 scale=resolution, levels=[1], facecolor="lightgrey",
                 edgecolor=None, alpha=1.0)
             self.map_ax.add_feature(coast)
-        gl = self.map_ax.gridlines(draw_labels=True)
+        gl = self.map_ax.gridlines(draw_labels=True, color="black")
         gl.right_labels = False
         gl.bottom_labels = False
         if self._station_locations is not None:
