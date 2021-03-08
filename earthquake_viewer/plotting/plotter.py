@@ -253,14 +253,14 @@ class Plotter(object):
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
             if self.config.plotting.lowcut and self.config.plotting.highcut:
-                tr = tr.split().detrend().taper(0.05).filter(
+                tr = tr.split().detrend().filter(
                     "bandpass", freqmin=self.config.plotting.lowcut,
                     freqmax=self.config.plotting.highcut)
             elif self.config.plotting.lowcut:
-                tr = tr.split().detrend().taper(0.05).filter(
+                tr = tr.split().detrend().filter(
                     "highpass", self.config.plotting.lowcut)
             elif self.config.plotting.highcut:
-                tr = tr.split().detrend().taper(0.05).filter(
+                tr = tr.split().detrend().filter(
                     "lowpass", self.config.plotting.highcut)
             if self.config.plotting.decimate > 1:
                 tr = tr.split().decimate(self.config.plotting.decimate)
