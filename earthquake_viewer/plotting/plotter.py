@@ -2,6 +2,7 @@
 Animated near-real-time plotting of streaming data.
 """
 
+from earthquake_viewer.listener.listener import EventInfo
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
@@ -11,6 +12,11 @@ import os
 import datetime as dt
 import numpy as np
 import copy
+import chime
+
+
+from typing import Iterable
+from itertools import zip_longest
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
@@ -21,10 +27,10 @@ import matplotlib.dates as mdates
 import matplotlib.table as mpltable
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from typing import Iterable
 from obspy import UTCDateTime
 
 from earthquake_viewer.config.config import Config
+from earthquake_viewer.listener.listener import EventInfo
 
 
 DEPTH_CMAP = copy.copy(cm.get_cmap("plasma_r"))  # To do - make a normalized cmap and scale bar
@@ -32,6 +38,18 @@ NORM = Normalize(vmin=0, vmax=100.0)
 DEPTH_CMAP.set_over("k")
 Logger = logging.getLogger(__name__)
 LOCALTZ = dt.datetime.now().astimezone().tzinfo
+
+MOST_RECENT = 10  # Number of events to put in the event table
+# Column titles keyed by event attribute
+COLUMNS = {
+    "time": "Origin-Time", 
+    "latitude": "Latitude", 
+    "longitude": "Longitude", 
+    "depth": "Depth (km)", 
+    "magnitude": "Magnitude"}
+COLUMN_WIDTHS = [0.3, 0.175, 0.175, 0.175, 0.175]
+NONEVENT = EventInfo(None, None, None, None, None, None)
+CHIME = True  # Make a noise when new events are registered
 
 
 def _scale_mags(magnitudes: Iterable) -> Iterable:
@@ -101,11 +119,13 @@ class Plotter(object):
             self.table_ax.set_axis_off()
             self.event_table = mpltable.table(
                 ax=self.table_ax, loc="center",
-                colLabels=["Origin-Time", "Latitude", "Longitude",
-                           "Depth (km)", "Magnitude"],
-                cellText=[[None, None, None, None, None] for _ in range(10)])
+                colLabels=list(COLUMNS.values()),
+                colWidths=COLUMN_WIDTHS,
+                cellText=[[None for _ in COLUMNS] 
+                          for _ in range(MOST_RECENT)])
+            self._events_in_table = set()
             self.event_table.auto_set_font_size(False)
-            self.event_table.set_fontsize(10)
+            self.event_table.set_fontsize(8)
             # Get the locations of stations
             inv = configuration.get_inventory(level="station")
             self._station_locations = dict()
@@ -203,7 +223,10 @@ class Plotter(object):
                     self.map_ax.text(
                         location[0], location[1], station_name,
                         horizontalalignment='right',
-                        verticalalignment="bottom", transform=ccrs.PlateCarree())
+                        verticalalignment="bottom", 
+                        transform=ccrs.PlateCarree(),
+                        bbox=dict(boxstyle='round', facecolor='white', 
+                                  alpha=0.5))
         # Make an empty scatter artist
         self.map_scatters = self.map_ax.scatter(
             [], [], s=[], facecolors=[], edgecolors="k",
@@ -249,7 +272,11 @@ class Plotter(object):
 
         for tr in stream:
             seed_id = tr.id
-            plot_lim = self._previous_plot_time[seed_id]
+            plot_lim = self._previous_plot_time.get(seed_id, None)
+            if plot_lim is None:
+                Logger.debug(
+                    f"{seed_id} not in {self._previous_plot_time.keys()}")
+                continue
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
             if self.config.plotting.lowcut and self.config.plotting.highcut:
@@ -282,12 +309,46 @@ class Plotter(object):
 
         return [self.waveform_axes]
 
+    def update_table(self):
+        listener_events = self.listener.old_events
+        if len(self.listener.old_events) == 0:
+            return []
+        listener_events = sorted(
+            listener_events, key=lambda ev: ev.time, 
+            reverse=True)[0:MOST_RECENT]
+        event_ids = {ev.event_id for ev in listener_events}
+        if event_ids.issubset(self._events_in_table):
+            # No new events
+            return [self.table_ax]
+        if CHIME:
+            chime.info()
+        cells = self.event_table.get_celld()
+        for row_num in range(MOST_RECENT):
+            try:
+                event = listener_events[row_num]
+            except IndexError:
+                event = NONEVENT
+            for col_num, attrib in enumerate(COLUMNS.keys()):
+                cell = cells[(row_num + 1, col_num)]
+                text = event.__getattribute__(attrib)
+                if attrib == "time":
+                    text = text.strftime("%Y/%m/%d %H:%M:%S")
+                elif attrib == "depth":
+                    text = f"{text / 1000:.1f}"
+                else:
+                    text = f"{text:.1f}"
+                # print(f"({row_num + 1}, {col_num}): {text}")
+                cell.set_text_props(text=text, ha="center")
+        self._events_in_table.update(event_ids)
+        return [self.table_ax]
+
     def update(self, *args, **kwargs):
         artists = []
         artists.extend(self.update_waveforms())
         if self.map_ax:
             # pass
             artists.extend(self.update_map())
+            artists.extend(self.update_table())
         return artists
 
     def animate(self):

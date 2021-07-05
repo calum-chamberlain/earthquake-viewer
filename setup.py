@@ -44,7 +44,7 @@ def setup_package():
     install_requires = [
         'numpy>=1.12', 'matplotlib>=1.3.0', 'scipy>=0.18', 'LatLon',
         'bottleneck', 'obspy>=1.0.3', 'h5py', 'eqcorrscan>=0.3.0',
-        'cartopy']
+        'cartopy', 'chime']
 
     setup_args = {
         'name': 'Earthquake-Viewer',
