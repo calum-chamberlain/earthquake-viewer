@@ -2,7 +2,6 @@
 Animated near-real-time plotting of streaming data.
 """
 
-from earthquake_viewer.listener.listener import EventInfo
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
@@ -16,7 +15,6 @@ import chime
 
 
 from typing import Iterable
-from itertools import zip_longest
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
@@ -32,11 +30,14 @@ from obspy import UTCDateTime
 from earthquake_viewer.config.config import Config
 from earthquake_viewer.listener.listener import EventInfo
 
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
-DEPTH_CMAP = copy.copy(cm.get_cmap("plasma_r"))  # To do - make a normalized cmap and scale bar
+DEPTH_CMAP = copy.copy(cm.get_cmap("plasma_r")) 
 NORM = Normalize(vmin=0, vmax=100.0)
-DEPTH_CMAP.set_over("k")
+DEPTH_CMAP.set_over("lime")
+
 Logger = logging.getLogger(__name__)
+
 LOCALTZ = dt.datetime.now().astimezone().tzinfo
 
 MOST_RECENT = 10  # Number of events to put in the event table
@@ -163,6 +164,14 @@ class Plotter(object):
         self.map_scatters = None
         self.waveform_lines = {
             key: None for key in self.config.earthquake_viewer.seed_ids}
+
+        # Add logos and info
+        vuw_logo_ax = fig.add_axes(
+            [0.9, 0.9, 0.1, 0.1], anchor='NE', zorder=-1)
+        vuw_logo = plt.imread(os.path.join(STATIC_DIR, "vuw_logo.png"))
+        vuw_logo_ax.imshow(vuw_logo)
+        vuw_logo_ax.axis('off')
+
         # Start background services
         if not self.listener.busy:
             Logger.info("Starting event listening service")
@@ -231,6 +240,10 @@ class Plotter(object):
         self.map_scatters = self.map_ax.scatter(
             [], [], s=[], facecolors=[], edgecolors="k",
             transform=ccrs.PlateCarree(), cmap=DEPTH_CMAP)
+        # Make a most recent scatter
+        self.most_recent_scatter = self.map_ax.scatter(
+            [], [], s=[], facecolors=[], edgecolors="gold", marker="*",
+            transform=ccrs.PlateCarree(), cmap=DEPTH_CMAP)
         # Magnitude scale
 
         # Colorbar
@@ -258,7 +271,16 @@ class Plotter(object):
         self.map_scatters.set_offsets(positions)
         self.map_scatters.set_sizes(mags ** 3)
         self.map_scatters.set_facecolors(colors)
-        return [self.map_scatters]
+
+        # Update the most recent scatter
+        most_recent_time = min(times)
+        most_recent_index = times.argmin()
+        self.most_recent_scatter.set_offsets([positions[most_recent_index]])
+        self.most_recent_scatter.set_facecolors([colors[most_recent_index]])
+        size = 300 - ((most_recent_time + 1) / 1800)
+        self.most_recent_scatter.set_sizes([size])
+
+        return [self.map_scatters, self.most_recent_scatter]
 
     def update_waveforms(self):
         # Get data from buffers
@@ -332,6 +354,11 @@ class Plotter(object):
                 cell = cells[(row_num + 1, col_num)]
                 text = event.__getattribute__(attrib)
                 if attrib == "time":
+                    text = dt.datetime(
+                        year=text.year, month=text.month, day=text.day,
+                        hour=text.hour, minute=text.minute, second=text.second,
+                        microsecond=text.microsecond, tzinfo=dt.timezone.utc)
+                    text = text.astimezone(LOCALTZ)
                     text = text.strftime("%Y/%m/%d %H:%M:%S")
                 elif attrib == "depth":
                     text = f"{text / 1000:.1f}"
