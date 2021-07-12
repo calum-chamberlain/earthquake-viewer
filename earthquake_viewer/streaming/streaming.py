@@ -8,13 +8,12 @@ License
     GPL v3.0
 """
 
-import time
 import threading
 import logging
 import numpy as np
 
 from abc import ABC, abstractmethod
-from typing import Union, List
+from typing import Union
 
 from obspy import Stream, Trace
 

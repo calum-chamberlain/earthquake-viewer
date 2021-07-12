@@ -25,15 +25,17 @@ import matplotlib.dates as mdates
 import matplotlib.table as mpltable
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from cartopy.mpl.ticker import LongitudeLocator, LatitudeLocator
+
 from obspy import UTCDateTime
 
 from earthquake_viewer.config.config import Config
-from earthquake_viewer.listener.listener import EventInfo
+from earthquake_viewer.listener.listener import EventInfo, PickInfo
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
 DEPTH_CMAP = copy.copy(cm.get_cmap("plasma_r")) 
-NORM = Normalize(vmin=0, vmax=100.0)
+NORM = Normalize(vmin=0, vmax=300.0)
 DEPTH_CMAP.set_over("lime")
 
 Logger = logging.getLogger(__name__)
@@ -49,8 +51,15 @@ COLUMNS = {
     "depth": "Depth (km)", 
     "magnitude": "Magnitude"}
 COLUMN_WIDTHS = [0.3, 0.175, 0.175, 0.175, 0.175]
-NONEVENT = EventInfo(None, None, None, None, None, None)
+NONEVENT = EventInfo(None, None, None, None, None, None, 
+    p_picks=[PickInfo(None, None, None, None)], 
+    s_picks=[PickInfo(None, None, None, None)])
+
 CHIME = True  # Make a noise when new events are registered
+chime.theme("zelda")
+
+PCOLOR = "red"
+SCOLOR = "purple"
 
 
 def _scale_mags(magnitudes: Iterable) -> Iterable:
@@ -83,6 +92,29 @@ def _blit_draw(self, artists):
 
 # MONKEY PATCH!!
 matplotlib.animation.Animation._blit_draw = _blit_draw
+
+
+def _time_string(seconds: int) -> str:
+    """
+    Get a string best fiting the elapsed time.
+
+    Parameters
+    ----------
+    seconds:
+        Total seconds to represent
+    """
+    value, unit = seconds, "seconds"
+    if 3600 > value >= 60:
+        value /= 60
+        unit = "minutes"
+    elif 86400 > value >= 3600:
+        value /= 3600
+        unit = "hours"
+    elif value >= 86400:
+        value /= 86400
+        unit = "days"
+
+    return f"{value:.1f} {unit}"
 
 
 class Plotter(object):
@@ -165,12 +197,40 @@ class Plotter(object):
         self.waveform_lines = {
             key: None for key in self.config.earthquake_viewer.seed_ids}
 
+        # Define pick times plotted
+        self.p_times = {
+            key: [] for key in self.config.earthquake_viewer.seed_ids}
+        self.s_times = {
+            key: [] for key in self.config.earthquake_viewer.seed_ids}
+
+        # Add legend showing pick labels
+        _p_line, = self.waveform_axes.plot([], [], c=PCOLOR)
+        _s_line, = self.waveform_axes.plot([], [], c=SCOLOR)
+        self.waveform_axes.legend(
+            title="Phase picks", handles=[_p_line, _s_line],
+            labels=["P", "S"], frameon=True, fancybox=True, loc="upper left")
+
         # Add logos and info
+        # VUW logo
         vuw_logo_ax = fig.add_axes(
             [0.9, 0.9, 0.1, 0.1], anchor='NE', zorder=-1)
         vuw_logo = plt.imread(os.path.join(STATIC_DIR, "vuw_logo.png"))
         vuw_logo_ax.imshow(vuw_logo)
+        vuw_logo_ax.text(
+            x=0.5, y=-0.4, s="Code by Calum Chamberlain", 
+            transform=vuw_logo_ax.transAxes, ha="center", va="bottom")
         vuw_logo_ax.axis('off')
+
+        # GeoNet logo
+        data_logo_ax = fig.add_axes(
+            [0.0, 0.9, 0.1, 0.1], anchor='NW', zorder=-1)
+        data_logo = plt.imread(
+            os.path.join(STATIC_DIR, "Data_source_logo.jpg"))
+        data_logo_ax.imshow(data_logo)
+        data_logo_ax.text(
+            x=0.5, y=-0.4, s=f"Data from {configuration.plotting.map_client}", 
+            transform=data_logo_ax.transAxes, ha="center", va="bottom")
+        data_logo_ax.axis('off')
 
         # Start background services
         if not self.listener.busy:
@@ -195,6 +255,9 @@ class Plotter(object):
         self.waveform_axes.grid(True)
         tickformat = mdates.DateFormatter("%H:%M", tz=LOCALTZ)
         self.waveform_axes.xaxis.set_major_formatter(tickformat)
+        self.waveform_axes.set_title(
+            f"Data filtered between {self.config.plotting.lowcut} and"
+            f" {self.config.plotting.highcut} Hz")
         return self.fig
 
     def _initialise_map(self):
@@ -218,7 +281,12 @@ class Plotter(object):
                 scale=resolution, levels=[1], facecolor="lightgrey",
                 edgecolor=None, alpha=1.0)
             self.map_ax.add_feature(coast)
-        gl = self.map_ax.gridlines(draw_labels=True, color="black")
+        gl = self.map_ax.gridlines(
+            draw_labels=True, color="black", alpha=0.5, zorder=2)
+        gl.xlocator = LongitudeLocator(
+            nbins=8, steps=[1, 2, 3, 4, 5, 6, 10], prune=None, min_n_ticks=5)
+        gl.ylocator = LatitudeLocator(
+            nbins=5, steps=[1, 2, 4, 5, 10], prune="both", min_n_ticks=3)
         gl.right_labels = False
         gl.bottom_labels = False
         if self._station_locations is not None:
@@ -245,6 +313,15 @@ class Plotter(object):
             [], [], s=[], facecolors=[], edgecolors="gold", marker="*",
             transform=ccrs.PlateCarree(), cmap=DEPTH_CMAP)
         # Magnitude scale
+        mag_scale_range = np.array([1.0, 3.0, 5.0, 7.0])
+        mag_mapper = [self.map_ax.plot(
+            [], [], 'ok', markersize=(m ** 3) ** .5, 
+            transform=ccrs.PlateCarree())[0] 
+                      for m in mag_scale_range]
+        mag_labels = [f"{m:.1f}" for m in mag_scale_range]
+        self.map_ax.legend(
+            title="Magnitude", handles=mag_mapper, labels=mag_labels,
+            frameon=True, fancybox=True)
 
         # Colorbar
         cb = ColorbarBase(
@@ -252,6 +329,10 @@ class Plotter(object):
         cb.set_label("Depth (km)")
         if hasattr(cb, "update_ticks"):
             cb.update_ticks()
+
+        self.map_ax.set_title(
+            "Events from the last "
+            f"{_time_string(self.config.plotting.event_history)}")
         return
 
     def update_map(self):
@@ -266,11 +347,16 @@ class Plotter(object):
         mags = np.array([ev.magnitude for ev in listener_events])
         times = np.array([now - ev.time for ev in listener_events])
         alphas = 1 - (times / self.config.plotting.event_history)
+        # Ensure boundedness
+        alphas[alphas < 0] = 0
+        alphas[alphas > 1] = 1
         colors = [DEPTH_CMAP(NORM(d), alpha=a) for a, d in zip(alphas, depths)]
+        edgecolors = [(0, 0, 0, a) for a in alphas]
         # Update the content of the artist!
         self.map_scatters.set_offsets(positions)
         self.map_scatters.set_sizes(mags ** 3)
         self.map_scatters.set_facecolors(colors)
+        self.map_scatters.set_edgecolors(edgecolors)
 
         # Update the most recent scatter
         most_recent_time = min(times)
@@ -294,6 +380,7 @@ class Plotter(object):
 
         for tr in stream:
             seed_id = tr.id
+            station = tr.stats.station
             plot_lim = self._previous_plot_time.get(seed_id, None)
             if plot_lim is None:
                 Logger.debug(
@@ -324,6 +411,28 @@ class Plotter(object):
 
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
+
+            # Get picks - only plot new picks!
+            p_picks = [p for ev in self.listener.old_events 
+                       for p in ev.p_picks if p.station == station]
+            s_picks = [p for ev in self.listener.old_events 
+                       for p in ev.s_picks if p.station == station]
+            for pick in p_picks:
+                pick_time = mdates.date2num(pick.time)
+                if pick_time in self.p_times[seed_id]:
+                    continue
+                self.waveform_axes.vlines(
+                    pick_time, ymin=self._data_offsets[seed_id] - .4,
+                    ymax=self._data_offsets[seed_id] + .4, color=PCOLOR)
+                self.p_times[seed_id].append(pick_time)
+            for pick in s_picks:
+                pick_time = mdates.date2num(pick.time)
+                if pick_time in self.s_times[seed_id]:
+                    continue
+                self.waveform_axes.vlines(
+                    pick_time, ymin=self._data_offsets[seed_id] - .4,
+                    ymax=self._data_offsets[seed_id] + .4, color=PCOLOR)
+                self.s_times[seed_id].append(pick_time)
 
         self.waveform_axes.set_xlim(
             (now - self.config.streaming.buffer_capacity).datetime,

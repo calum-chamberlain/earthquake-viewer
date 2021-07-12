@@ -5,19 +5,25 @@ Listener ABC.
 import threading
 import logging
 
-import numpy as np
-from obspy import UTCDateTime
-from obspy.core.event import Event, Origin
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import List, Union, Tuple
+
+import numpy as np
+from obspy import UTCDateTime
+from obspy.core.event import Event, Origin
+from obspy.core.event.origin import Pick
+
 
 Logger = logging.getLogger(__name__)
 
 
 EventInfo = namedtuple(
     "EventInfo", ("event_id", "time", "latitude", "longitude", "depth",
-                  "magnitude"))
+                  "magnitude", "p_picks", "s_picks"))
+
+PickInfo = namedtuple(
+    "PickInfo", ("time", "seed_id", "phase_hint", "station"))
 
 
 class _Listener(ABC):
@@ -171,10 +177,27 @@ def event_depth(event: Event) -> float:
         return None
 
 
+def summarise_pick(pick: Pick) -> PickInfo:
+    return PickInfo(time=pick.time.datetime, 
+                    seed_id=pick.waveform_id.get_seed_string(),
+                    station=pick.waveform_id.station_code,
+                    phase_hint=pick.phase_hint)
+
+
+def event_picks(event: Event) -> Tuple[List[PickInfo], List[PickInfo]]:
+    p_picks = [summarise_pick(p) 
+               for p in event.picks if p.phase_hint.lower().startswith("p")]
+    s_picks = [summarise_pick(p) 
+               for p in event.picks if p.phase_hint.lower().startswith("s")]
+    return p_picks, s_picks
+
+
 def summarise_event(event: Event) -> EventInfo:
+    p_picks, s_picks = event_picks(event)
     return EventInfo(
         event.resource_id.id, event_time(event), event_latitude(event),
-        event_longitude(event), event_depth(event), event_magnitude(event))
+        event_longitude(event), event_depth(event), event_magnitude(event),
+        p_picks, s_picks)
 
 
 if __name__ == "__main__":
