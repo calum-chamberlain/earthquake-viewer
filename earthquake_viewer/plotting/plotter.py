@@ -1,6 +1,7 @@
 """
 Animated near-real-time plotting of streaming data.
 """
+import time
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -27,7 +28,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from cartopy.mpl.ticker import LongitudeLocator, LatitudeLocator
 
-from obspy import UTCDateTime
+from obspy import UTCDateTime, Stream
 
 from earthquake_viewer.config.config import Config
 from earthquake_viewer.listener.listener import EventInfo, PickInfo
@@ -192,6 +193,7 @@ class Plotter(object):
         self._previous_plot_time = {
             key: UTCDateTime(1970, 1, 1)
             for key in self.config.earthquake_viewer.seed_ids}
+        self._last_data = UTCDateTime(0)
         # Define artists
         self.map_scatters = None
         self.waveform_lines = {
@@ -236,7 +238,7 @@ class Plotter(object):
         if not self.listener.busy:
             Logger.info("Starting event listening service")
             self.listener.background_run(event_type="earthquake")
-        if not self.streamer.busy:
+        if not self.streamer.streaming:
             Logger.info("Starting waveform streaming service")
             self.streamer.background_run()
         return
@@ -297,6 +299,7 @@ class Plotter(object):
                 transform=ccrs.PlateCarree())
             if self.config.plotting.label_stations:
                 for station_name, location in self._station_locations.items():
+                    station_name = station_name.split('.')[-1]
                     self.map_ax.text(
                         location[0], location[1], station_name,
                         horizontalalignment='right',
@@ -371,12 +374,12 @@ class Plotter(object):
     def update_waveforms(self):
         # Get data from buffers
         now = UTCDateTime.now()
-        if not self.streamer.has_new_data:
-            self.waveform_axes.set_xlim(
-                (now - self.config.streaming.buffer_capacity).datetime,
-                now.datetime)
+        plot_starttime = now - self.config.streaming.buffer_capacity
+        if self._last_data >= self.streamer.last_data:
+            Logger.info("No new data")
+            self.waveform_axes.set_xlim(plot_starttime.datetime, now.datetime)
             return [self.waveform_axes]
-        stream = self.streamer.stream.copy()
+        stream = self.streamer.stream.copy().merge()
 
         for tr in stream:
             seed_id = tr.id
@@ -386,8 +389,10 @@ class Plotter(object):
                 Logger.debug(
                     f"{seed_id} not in {self._previous_plot_time.keys()}")
                 continue
+            Logger.debug(f"Working on data for {seed_id} ending {tr.stats.endtime} - last plotted {plot_lim}")
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
+            tic = time.perf_counter()
             if self.config.plotting.lowcut and self.config.plotting.highcut:
                 tr = tr.split().detrend().filter(
                     "bandpass", freqmin=self.config.plotting.lowcut,
@@ -400,10 +405,15 @@ class Plotter(object):
                     "lowpass", self.config.plotting.highcut)
             if self.config.plotting.decimate > 1:
                 tr = tr.split().decimate(self.config.plotting.decimate)
-            tr = tr.merge()[0]
+            if isinstance(tr, Stream):
+                tr = tr.merge()[0]
+            toc = time.perf_counter()
+            Logger.debug(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
+
+            tic = time.perf_counter()
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
             times = tr.times("matplotlib")
-            data = tr.data
+            data = tr.data.astype(float)
 
             # Normalize and offset
             data /= 2.5 * np.abs(data).max()
@@ -411,32 +421,44 @@ class Plotter(object):
 
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
+            toc = time.perf_counter()
+            Logger.debug(f"\tPlotting for {seed_id} took {toc - tic:.3f}s")
 
             # Get picks - only plot new picks!
+            tic = time.perf_counter()
             p_picks = [p for ev in self.listener.old_events 
-                       for p in ev.p_picks if p.station == station]
+                       for p in ev.p_picks if p.station == station
+                       and p.time > plot_starttime]
             s_picks = [p for ev in self.listener.old_events 
-                       for p in ev.s_picks if p.station == station]
-            for pick in p_picks:
-                pick_time = mdates.date2num(pick.time)
-                if pick_time in self.p_times[seed_id]:
-                    continue
-                self.waveform_axes.vlines(
-                    pick_time, ymin=self._data_offsets[seed_id] - .4,
-                    ymax=self._data_offsets[seed_id] + .4, color=PCOLOR)
-                self.p_times[seed_id].append(pick_time)
-            for pick in s_picks:
-                pick_time = mdates.date2num(pick.time)
-                if pick_time in self.s_times[seed_id]:
-                    continue
-                self.waveform_axes.vlines(
-                    pick_time, ymin=self._data_offsets[seed_id] - .4,
-                    ymax=self._data_offsets[seed_id] + .4, color=PCOLOR)
-                self.s_times[seed_id].append(pick_time)
+                       for p in ev.s_picks if p.station == station
+                       and p.time > plot_starttime]
+            for pcolor, _picks, _times in zip(
+                    [PCOLOR, SCOLOR], [p_picks, s_picks],
+                    [self.p_times, self.s_times]):
+                for pick in _picks:
+                    pick_time = mdates.date2num(pick.time)
+                    if pick_time in _times[seed_id]:
+                        continue
+                    self.waveform_axes.vlines(
+                        pick_time, ymin=self._data_offsets[seed_id] - .4,
+                        ymax=self._data_offsets[seed_id] + .4, color=pcolor)
+                    _times[seed_id].append(pick_time)
+            toc = time.perf_counter()
+            Logger.debug(f"\tPlotting picks for {seed_id} took {toc - tic:.3f}s")
 
-        self.waveform_axes.set_xlim(
-            (now - self.config.streaming.buffer_capacity).datetime,
-            now.datetime)
+        plot_starttime = (now - self.config.streaming.buffer_capacity).datetime
+        self.waveform_axes.set_xlim(plot_starttime, now.datetime)
+        plot_starttime = mdates.date2num(plot_starttime)
+
+        # Remove pick-times that are off-screen
+        for seed_id in self.p_times.keys():
+            self.p_times[seed_id] = [
+                pick_time for pick_time in self.p_times[seed_id]
+                if pick_time > plot_starttime]
+        for seed_id in self.s_times.keys():
+            self.s_times[seed_id] = [
+                pick_time for pick_time in self.s_times[seed_id]
+                if pick_time > plot_starttime]
 
         return [self.waveform_axes]
 
@@ -448,10 +470,11 @@ class Plotter(object):
             listener_events, key=lambda ev: ev.time, 
             reverse=True)[0:MOST_RECENT]
         event_ids = {ev.event_id for ev in listener_events}
+        # if event_ids.issubset(self._events_in_table) and not self.config.plotting.refresh:
         if event_ids.issubset(self._events_in_table):
             # No new events
             return [self.table_ax]
-        if CHIME:
+        if CHIME and not event_ids.issubset(self._events_in_table):
             chime.info()
         cells = self.event_table.get_celld()
         for row_num in range(MOST_RECENT):
@@ -480,11 +503,21 @@ class Plotter(object):
 
     def update(self, *args, **kwargs):
         artists = []
+        tic = time.perf_counter()
         artists.extend(self.update_waveforms())
+        toc = time.perf_counter()
+        Logger.info(f"Waveform update took {toc - tic:.3f}s")
         if self.map_ax:
             # pass
+            tic = time.perf_counter()
             artists.extend(self.update_map())
+            toc = time.perf_counter()
+            Logger.info(f"Updating map took {toc - tic:.3f}s")
+
+            tic = time.perf_counter()
             artists.extend(self.update_table())
+            toc = time.perf_counter()
+            Logger.info(f"Updating table took {toc - tic:.3f}s")
         return artists
 
     def animate(self):
@@ -499,7 +532,9 @@ class Plotter(object):
             self.fig.canvas.manager.full_screen_toggle()
         ani = self.animate()
         plt.show(block=True)
-
+        # Close the streamer when the plot closes
+        self.streamer.background_stop()
+        self.listener.background_stop()
 
 
 if __name__ == "__main__":

@@ -2,18 +2,30 @@
 Listener ABC.
 """
 
-import threading
 import logging
+import time
 
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import List, Union, Tuple
+from queue import Empty, Full
 
 import numpy as np
 from obspy import UTCDateTime
 from obspy.core.event import Event, Origin
 from obspy.core.event.origin import Pick
 
+import platform
+if platform.system() != "Linux":
+    warnings.warn("Currently Process-based streaming is only supported on "
+                  "Linux, defaulting to Thread-based streaming - you may run "
+                  "into delayed plotting when updating often")
+    import threading as multiprocessing
+    from queue import Queue
+    from threading import Thread as Process
+else:
+    import multiprocessing
+    from multiprocessing import Queue, Process
 
 Logger = logging.getLogger(__name__)
 
@@ -32,40 +44,76 @@ class _Listener(ABC):
     Reactor should fit in this scope.
     """
     busy = False
+    started = False
 
-    threads = []
+    processes = []
     client = None
-    # TODO: old_events should be a property with getter and setter methods that are threadsafe!
-    _old_events = []  # List of tuples of (event_id, event_time)
     keep = 86400  # Time in seconds to keep old events
-    lock = threading.Lock()  # Lock for access to old_events
+    lock = multiprocessing.Lock()  # Lock for access to old_events
+    _stop_called = False
+
+    def __init__(self) -> None:
+        # Queues for comms
+        self._catalog_in_queue = Queue()
+        self._old_events_queue = Queue(maxsize=1)
+
+        # Poison!
+        self._killer_queue = Queue(maxsize=1)
+        self._dead_queue = Queue(maxsize=1)
+
+        self.__old_events = []  # List of EventInfo namedtuples
 
     @abstractmethod
     def run(self, *args, **kwargs):
         """ Run the listener """
 
-    def get_old_events(self) -> List[EventInfo]:
-        """ Threadsafe access to underlying list of tuples of old-events. """
-        with self.lock:
-            old_events = self._old_events
-        return old_events
+    @property
+    def old_events(self) -> List[EventInfo]:
+        try:
+            self.__old_events = self._old_events_queue.get(block=False)
+            # Need to put it back for future processes
+            try:
+                self._old_events_queue.put(self.__old_events, block=False)
+            except Full:
+                pass
+        except Empty:
+            Logger.debug("No events in queue")
+            pass
+        return self.__old_events
 
-    def set_old_events(self, events: List[EventInfo]):
-        with self.lock:
-            self._old_events = events
-
-    old_events = property(fget=get_old_events, fset=set_old_events)
+    @old_events.setter
+    def old_events(self, events: List[EventInfo]):
+        try:
+            self._old_events_queue.put(events, block=False)
+            Logger.debug("Put events into queue")
+        except Full:
+            # Empty it
+            try:
+                self._old_events_queue.get(block=False)
+            except Empty:
+                pass
+            try:
+                self._old_events_queue.put(events, timeout=10)
+            except Full:
+                Logger.error("Could not update old events - queue is full")
 
     def remove_old_event(self, event: EventInfo):
-        with self.lock:  # Make threadsafe
-            self._old_events.remove(event)
+        old_events = self.old_events
+        try:
+            old_events.remove(event)
+        except ValueError:
+            Logger.warning(f"{event} not in old_events")
+            return
+        # Update old events
+        self.old_events = old_events
 
     def extend(self, events: Union[EventInfo, List[EventInfo]]):
         """ Threadsafe way to add events to the cache """
         if isinstance(events, EventInfo):
             events = [events]
-        with self.lock:
-            self._old_events.extend(events)
+        old_events = self.old_events
+        old_events.extend(events)
+        self.old_events = old_events
 
     def _remove_old_events(self, endtime: UTCDateTime) -> None:
         """
@@ -86,23 +134,78 @@ class _Listener(ABC):
             if not filt[i]:
                 self.remove_old_event(old_event)
 
+    def _clear_killer(self):
+        """ Clear the killer Queue. """
+        while True:
+            try:
+                self._killer_queue.get(block=False)
+            except Empty:
+                break
+        while True:
+            try:
+                self._dead_queue.get(block=False)
+            except Empty:
+                break
+
+    def _bg_run(self, *args, **kwargs):
+        while self.busy:
+            self.run(*args, **kwargs)
+        Logger.info("Running stopped, busy set to false")
+        try:
+            self._dead_queue.get(block=False)
+        except Empty:
+            pass
+        self._dead_queue.put(True)
+        return
+
     def background_run(self, *args, **kwargs):
         self.busy = True
-        listening_thread = threading.Thread(
-            target=self.run, args=args, kwargs=kwargs,
-            name="ListeningThread")
-        listening_thread.daemon = True
+        self._clear_killer()
+        listening_thread = Process(
+            target=self._bg_run, args=args, kwargs=kwargs,
+            name="ListeningProcess")
+        # listening_thread.daemon = True
         listening_thread.start()
-        self.threads.append(listening_thread)
+        self.processes.append(listening_thread)
         Logger.info("Started listening to {0}".format(self.client.base_url))
 
     def background_stop(self):
+        Logger.info("Adding Poison to Kill Queue")
+        # Run communications before termination
+        old_events = self.old_events
+
+        self._killer_queue.put(True)
+        Logger.debug("Adding old events to local buffer")
+        self.old_events = old_events
+
+        Logger.debug("Waiting for internal process to stop")
+        while self.busy:
+            try:
+                self.busy = not self._dead_queue.get(block=False)
+            except Empty:
+                time.sleep(1)
+                pass
+        Logger.debug("Listener stopped")
+
+        for queue in [self._catalog_in_queue, self._old_events_queue,
+                      self._killer_queue, self._dead_queue]:
+            while True:
+                try:
+                    queue.get(block=False)
+                except Empty:
+                    break
+        # join the processes
+        for process in self.processes:
+            Logger.info("Joining process")
+            process.join(5)
+            if hasattr(process, 'exitcode') and process.exitcode:
+                Logger.info("Process failed to join, terminating")
+                process.terminate()
+                Logger.info("Terminated")
+                process.join()
+            Logger.info("Process joined")
+        self.processes = []
         self.busy = False
-        for thread in self.threads:
-            thread.join(timeout=10)
-            if thread.is_alive():
-                # Didn't join within timeout...
-                thread.join()
 
 
 def event_origin(event: Event) -> Origin:

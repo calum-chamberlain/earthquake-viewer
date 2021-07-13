@@ -87,6 +87,7 @@ class PlottingConfig(_ConfigAttribDict):
         "map_bounds": (165.96, 180, -47.23, -34.54),
         "event_history": 86400 * 2,
         "label_stations": True,
+        "refresh": True,
     }
     readonly = []
 
@@ -176,7 +177,7 @@ class PlottingConfig(_ConfigAttribDict):
         return CatalogListener(
             client=client, catalog_lookup_kwargs=catalog_lookup_kwargs,
             interval=self.map_update_interval, keep=self.event_history,
-            catalog=catalog)
+            catalog=catalog, refresh=self.refresh)
 
 
 class StreamingConfig(_ConfigAttribDict):

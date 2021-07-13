@@ -6,6 +6,8 @@ import logging
 import copy
 
 from typing import Union, Callable
+from queue import Empty
+
 from obspy import UTCDateTime, Catalog
 from obspy.core.event import Event
 
@@ -142,8 +144,6 @@ class CatalogListener(_Listener):
         in the original catalog.
     catalog_lookup_kwargs:
         Dictionary of keyword arguments for `client.get_events`.
-    template_bank:
-        A Template database - new events will be added to this database.
     interval:
         Interval for querying the client in seconds. Note that rapid queries
         may not be more efficient, and will almost certainly piss off your
@@ -151,9 +151,9 @@ class CatalogListener(_Listener):
     keep:
         Time in seconds to keep events for in the catalog in memory. Will not
         remove old events on disk. Use to reduce memory consumption.
-    waveform_client
-        Client with at least a `get_waveforms` and `get_waveforms_bulk` method.
-        If this is None (default) then the `client` will be used.
+    refresh:
+        Whether to refresh the catalog or just get new events - useful if the
+        client may update the catalog.
     """
     busy = False
     _test_start_step = 0  # Number of seconds prior to `now` used for testing.
@@ -167,11 +167,13 @@ class CatalogListener(_Listener):
         catalog_lookup_kwargs: dict = None,
         interval: float = 10,
         keep: float = 86400,
+        refresh: bool = True,
     ):
+        _Listener.__init__(self)  # Init ABC to get the queues
         self.client = client
         if catalog is None:
             catalog = Catalog()
-        self.set_old_events(events=[summarise_event(ev) for ev in catalog])
+        self.old_events = [summarise_event(ev) for ev in catalog]
         self.catalog_lookup_kwargs = catalog_lookup_kwargs or dict()
         self.interval = interval
         self.keep = keep
@@ -179,6 +181,7 @@ class CatalogListener(_Listener):
         self.triggered_events = Catalog()
         self.busy = False
         self.previous_time = UTCDateTime.now()
+        self.refresh = refresh
 
     def __repr__(self):
         """
@@ -239,13 +242,15 @@ class CatalogListener(_Listener):
             If the `filter_func` has changed then this should be the
             additional kwargs for the user-defined filter_func.
         """
-        self.busy = True
         if starttime is None:
             self.previous_time -= self._test_start_step
         else:
             self.previous_time = starttime
+        self._stop_called = False  # Reset this - if someone called run,
+        # they probably want us to run!
+
         loop_duration = 0  # Timer for loop, used in synthesising speed-ups
-        while self.busy:
+        while not self._stop_called:
             tic = time.time()  # Timer for loop, used in synthesising speed-ups
             if self._test_start_step > 0:
                 # Still processing past data
@@ -260,22 +265,26 @@ class CatalogListener(_Listener):
             now = UTCDateTime.now() - self._test_start_step
             # Remove old events from cache
             self._remove_old_events(now)
+            # Check for new events - add in a pad of five times the
+            # checking interval to ensure that slow-to-update events are
+            # included.
+            if self.refresh:
+                _starttime = now - self.keep
+            else:
+                _starttime = self.previous_time - (5 * self.interval)
             Logger.debug("Checking for new events between {0} and {1}".format(
-                self.previous_time, now))
+                _starttime, now))
             try:
-                # Check for new events - add in a pad of five times the
-                # checking interval to ensure that slow-to-update events are
-                # included.
                 new_events = self.client.get_events(
-                    starttime=self.previous_time - (5 * self.interval),
-                    endtime=now, **self.catalog_lookup_kwargs)
+                    starttime=_starttime, endtime=now,
+                    **self.catalog_lookup_kwargs)
             except Exception as e:
                 if "No data available for request" in e.args[0]:
                     Logger.debug("No new data")
                 else:  # pragma: no cover
                     Logger.error(
                         "Could not download data between {0} and {1}".format(
-                            self.previous_time, now))
+                            _starttime, now))
                     Logger.error(e)
                 time.sleep(self.sleep_interval)
                 toc = time.time()  # Timer for loop, used in synthesising speed-ups
@@ -287,12 +296,13 @@ class CatalogListener(_Listener):
                         new_events, min_stations=min_stations,
                         auto_picks=auto_picks, auto_event=auto_event,
                         event_type=event_type, **filter_kwargs)
-                old_event_ids = [tup[0] for tup in self.old_events]
-                new_events = Catalog(
-                    [ev for ev in new_events if ev.resource_id
-                     not in old_event_ids])
+                if not self.refresh:
+                    old_event_ids = [e.event_id for e in self.old_events]
+                    new_events = Catalog(
+                        [ev for ev in new_events if ev.resource_id
+                         not in old_event_ids])
                 Logger.info("{0} new events between {1} and {2}".format(
-                    len(new_events), self.previous_time, now))
+                    len(new_events), _starttime, now))
                 if len(new_events) > 0:
                     Logger.info("Adding {0} new events to the database".format(
                         len(new_events)))
@@ -315,8 +325,20 @@ class CatalogListener(_Listener):
                                 origin.latitude, origin.longitude,
                                 origin.depth / 1000.))
                     event_info = [summarise_event(ev) for ev in new_events]
-                    # Putting the events in the bank clears the catalog.
-                    self.extend(event_info)
+                    if not self.refresh:
+                        self.extend(event_info)
+                    else:
+                        # Update old events
+                        old_event_dict = {
+                            e.event_id: e for e in self.old_events}
+                        for event in event_info:
+                            if event.event_id in old_event_dict.keys():
+                                Logger.debug(f"Updating event {event.event_id}")
+                                # Remove the previous version and update it
+                                old_event = old_event_dict.pop(event.event_id)
+                                self.remove_old_event(old_event)
+                            self.extend(event)
+                            old_event_dict.update({event.event_id: event})
                     Logger.debug("Old events current state: {0}".format(
                         self.old_events))
             self.previous_time = now
@@ -326,12 +348,21 @@ class CatalogListener(_Listener):
             while _slept < self.sleep_interval:
                 _tic = time.time()
                 time.sleep(_sleep_step)  # Need to sleep to allow other threads to run
-                if not self.busy:
+                # Murder check
+                try:
+                    kill = self._killer_queue.get(block=False)
+                except Empty:
+                    kill = False
+                if kill:
+                    Logger.warning(
+                        "Run termination called - poison received.")
+                    self._stop_called = True
                     break
                 _toc = time.time()
                 _slept += _toc - _tic
             toc = time.time()  # Timer for loop, used in synthesising speed-ups
             loop_duration = toc - tic
+        self.busy = False
         return
 
 
