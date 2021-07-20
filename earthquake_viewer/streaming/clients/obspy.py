@@ -74,7 +74,6 @@ class RealTimeClient(_StreamingClient):
         self.starttime = starttime
         self.query_interval = query_interval
         self.speed_up = speed_up
-        self.bulk = []
         self.streaming = False
         Logger.info(
             "Instantiated simulated real-time client "
@@ -95,11 +94,13 @@ class RealTimeClient(_StreamingClient):
             buffer = Stream()
         else:
             buffer = self.stream
-        return RealTimeClient(
+        new_client = RealTimeClient(
             server_url=self.client.base_url,
             client=self.client, starttime=self.starttime,
             query_interval=self.query_interval, speed_up=self.speed_up,
             buffer=buffer, buffer_capacity=self.buffer_capacity)
+        new_client._selectors = copy.deepcopy(self._selectors)
+        return new_client
 
     def select_stream(self, net: str, station: str, selector: str) -> None:
         """
@@ -115,12 +116,12 @@ class RealTimeClient(_StreamingClient):
         _bulk = {
             "network": net, "station": station, "location": "*",
             "channel": selector, "starttime": None, "endtime": None}
-        if _bulk not in self.bulk:
+        if _bulk not in self._selectors:
             Logger.debug("Added {0} to streaming selection".format(_bulk))
-            self.bulk.append(_bulk)
+            self._selectors.update(_bulk)
 
     def run(self) -> None:
-        assert len(self.bulk) > 0, "Select a stream first"
+        assert len(self._selectors) > 0, "Select a stream first"
         self.streaming = True
         now = copy.deepcopy(self.starttime)
         self.last_data = UTCDateTime.now()
@@ -139,7 +140,7 @@ class RealTimeClient(_StreamingClient):
             _query_start = UTCDateTime.now()
             st = Stream()
             query_passed = True
-            for _bulk in self.bulk:
+            for _bulk in self._selectors:
                 jitter = random.randint(int(self.query_interval))
                 _bulk.update({
                     "starttime": last_query_start,
@@ -168,7 +169,8 @@ class RealTimeClient(_StreamingClient):
                 time.sleep(sleep_step)
             now += max(self.query_interval, _query_duration)
             if query_passed:
-                last_query_start = min(_bulk["endtime"] for _bulk in self.bulk)
+                last_query_start = min(_bulk["endtime"]
+                                       for _bulk in self._selectors)
         self.streaming = False
         return
 

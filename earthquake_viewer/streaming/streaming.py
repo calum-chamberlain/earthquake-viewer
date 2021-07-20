@@ -57,6 +57,7 @@ class _StreamingClient(ABC):
     """
     streaming = False
     started = False
+    _selectors = []  # List of selected streams - used for re-creation
     can_add_streams = True
     lock = multiprocessing.Lock()  # Lock for buffer access
     _stop_called = False
@@ -126,6 +127,7 @@ class _StreamingClient(ABC):
         selector
             a valid SEED ID channel selector, e.g. ``EHZ`` or ``EH?``
         """
+        # Note that this should add information to the self._selectors
 
     @abstractmethod
     def stop(self) -> None:

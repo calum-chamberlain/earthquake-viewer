@@ -9,11 +9,13 @@ import matplotlib.pyplot as plt
 import logging
 import matplotlib
 import os
+import gc
 import datetime as dt
 import numpy as np
 import copy
 import chime
 
+from pympler import summary, muppy
 
 from typing import Iterable
 
@@ -119,6 +121,8 @@ def _time_string(seconds: int) -> str:
 
 
 class Plotter(object):
+    _timeout = 120  # Timeout limit for restarting streamer.
+
     def __init__(
         self,
         configuration: Config,
@@ -130,7 +134,22 @@ class Plotter(object):
             plt.style.use(
                 os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              configuration.plotting.style))
+
+        # start services immediately to reduce memory copying
         fig = plt.figure(figsize=configuration.plotting.figure_size)
+        self.fig = fig
+        self.config = configuration
+        self.streamer = configuration.get_streamer()
+        self.listener = configuration.get_listener()
+        # Start background services
+        if not self.listener.busy:
+            Logger.info("Starting event listening service")
+            self.listener.background_run(event_type="earthquake")
+        if not self.streamer.streaming:
+            Logger.info("Starting waveform streaming service")
+            self.streamer.background_run()
+
+        # Set up plots
         if configuration.plotting.plot_map:
             # Factorise the width to get a sensible number of columns
             largest_factor = 100 % configuration.plotting.map_width_percent
@@ -183,10 +202,6 @@ class Plotter(object):
         self._data_offsets = {label: tick for tick, label in zip(ticks, labels)}
         fig.subplots_adjust(hspace=0)
         # Define properties
-        self.fig = fig
-        self.config = configuration
-        self.streamer = configuration.get_streamer()
-        self.listener = configuration.get_listener()
         self._previous_map_update = (
                 UTCDateTime.now() - self.config.plotting.event_history)
         self._plotted_event_ids = list()
@@ -233,14 +248,6 @@ class Plotter(object):
             x=0.5, y=-0.4, s=f"Data from {configuration.plotting.map_client}", 
             transform=data_logo_ax.transAxes, ha="center", va="bottom")
         data_logo_ax.axis('off')
-
-        # Start background services
-        if not self.listener.busy:
-            Logger.info("Starting event listening service")
-            self.listener.background_run(event_type="earthquake")
-        if not self.streamer.streaming:
-            Logger.info("Starting waveform streaming service")
-            self.streamer.background_run()
         return
 
     def initialise_plot(self):
@@ -375,6 +382,17 @@ class Plotter(object):
         # Get data from buffers
         now = UTCDateTime.now()
         plot_starttime = now - self.config.streaming.buffer_capacity
+        # Check that the streamer is alive!
+        if now - self.streamer.last_data > self._timeout:
+            Logger.error(
+                f"No new data for {now - self.streamer.last_data:.2f}s, "
+                f"restarting streamer")
+            new_streamer = self.streamer.copy(empty_buffer=False)
+            self.streamer.on_terminate()
+            self.streamer = new_streamer
+            self.streamer.background_run()
+
+        # Check for new data
         if self._last_data >= self.streamer.last_data:
             Logger.info("No new data")
             self.waveform_axes.set_xlim(plot_starttime.datetime, now.datetime)
@@ -389,9 +407,14 @@ class Plotter(object):
                 Logger.debug(
                     f"{seed_id} not in {self._previous_plot_time.keys()}")
                 continue
-            Logger.debug(f"Working on data for {seed_id} ending {tr.stats.endtime} - last plotted {plot_lim}")
+            Logger.debug(f"Working on data for {seed_id} ending "
+                         f"{tr.stats.endtime} - last plotted {plot_lim}")
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
+            # Update last data
+            self._last_data = max(self._last_data, tr.stats.endtime)
+
+            # Process the data
             tic = time.perf_counter()
             if self.config.plotting.lowcut and self.config.plotting.highcut:
                 tr = tr.split().detrend().filter(
@@ -408,7 +431,7 @@ class Plotter(object):
             if isinstance(tr, Stream):
                 tr = tr.merge()[0]
             toc = time.perf_counter()
-            Logger.debug(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
+            Logger.info(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
 
             tic = time.perf_counter()
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
@@ -460,6 +483,8 @@ class Plotter(object):
                 pick_time for pick_time in self.s_times[seed_id]
                 if pick_time > plot_starttime]
 
+        del stream
+
         return [self.waveform_axes]
 
     def update_table(self):
@@ -498,7 +523,7 @@ class Plotter(object):
                     text = f"{text:.1f}"
                 # print(f"({row_num + 1}, {col_num}): {text}")
                 cell.set_text_props(text=text, ha="center")
-        self._events_in_table.update(event_ids)
+        self._events_in_table = event_ids
         return [self.table_ax]
 
     def update(self, *args, **kwargs):
@@ -518,6 +543,10 @@ class Plotter(object):
             artists.extend(self.update_table())
             toc = time.perf_counter()
             Logger.info(f"Updating table took {toc - tic:.3f}s")
+        gc.collect()
+        # Memory output
+        # sum1 = summary.summarize(muppy.get_objects())
+        # summary.print_(sum1)
         return artists
 
     def animate(self):

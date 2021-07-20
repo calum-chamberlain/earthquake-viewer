@@ -160,9 +160,13 @@ class RealTimeClient(_StreamingClient, EasySeedLinkClient):
             buffer = Stream()
         else:
             buffer = self.stream
-        return RealTimeClient(
+        new_client = RealTimeClient(
             server_url=self.server_hostname, buffer=buffer,
             buffer_capacity=self.buffer_capacity)
+        # Select the same streams
+        for _bulk in self._selectors:
+            new_client.select_stream(**_bulk)
+        return new_client
 
     def start(self) -> None:
         """ Start the connection. """
@@ -206,6 +210,9 @@ class RealTimeClient(_StreamingClient, EasySeedLinkClient):
             raise EasySeedLinkClientException(msg)
 
         self.conn.add_stream(net, station, selector, seqnum=-1, timestamp=None)
+        _bulk = dict(net=net, station=station, selector=selector)
+        if _bulk not in self._selectors:
+            self._selectors.append(_bulk)
 
     def stop(self) -> None:
         self._stop_called = True
