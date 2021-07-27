@@ -120,7 +120,7 @@ def _time_string(seconds: int) -> str:
     return f"{value:.1f} {unit}"
 
 
-class Plotter(object):
+class MPLPlotter(object):
     _timeout = 120  # Timeout limit for restarting streamer.
 
     def __init__(
@@ -177,6 +177,8 @@ class Plotter(object):
                 cellText=[[None for _ in COLUMNS] 
                           for _ in range(MOST_RECENT)])
             self._events_in_table = set()
+            self._map_update_time = dt.datetime.now()
+            self._most_recent_time = dt.datetime(1, 1, 1)
             self.event_table.auto_set_font_size(False)
             self.event_table.set_fontsize(8)
             # Get the locations of stations
@@ -343,6 +345,8 @@ class Plotter(object):
         self.map_ax.set_title(
             "Events from the last "
             f"{_time_string(self.config.plotting.event_history)}")
+        # Set a suitable time to enforce update on first loop
+        self._map_update_time = dt.datetime(1, 1, 1)
         return
 
     def update_map(self):
@@ -415,6 +419,7 @@ class Plotter(object):
             self._last_data = max(self._last_data, tr.stats.endtime)
 
             # Process the data
+            # TODO: Process data outside of main event loop!
             tic = time.perf_counter()
             if self.config.plotting.lowcut and self.config.plotting.highcut:
                 tr = tr.split().detrend().filter(
@@ -439,7 +444,7 @@ class Plotter(object):
             data = tr.data.astype(float)
 
             # Normalize and offset
-            data /= 2.5 * np.abs(data).max()
+            data /= 20 * data.std()
             data += self._data_offsets[seed_id]
 
             # Update!
@@ -464,7 +469,8 @@ class Plotter(object):
                         continue
                     self.waveform_axes.vlines(
                         pick_time, ymin=self._data_offsets[seed_id] - .4,
-                        ymax=self._data_offsets[seed_id] + .4, color=pcolor)
+                        ymax=self._data_offsets[seed_id] + .4, color=pcolor,
+                        zorder=100)
                     _times[seed_id].append(pick_time)
             toc = time.perf_counter()
             Logger.debug(f"\tPlotting picks for {seed_id} took {toc - tic:.3f}s")
@@ -495,12 +501,15 @@ class Plotter(object):
             listener_events, key=lambda ev: ev.time, 
             reverse=True)[0:MOST_RECENT]
         event_ids = {ev.event_id for ev in listener_events}
-        # if event_ids.issubset(self._events_in_table) and not self.config.plotting.refresh:
-        if event_ids.issubset(self._events_in_table):
+        if event_ids.issubset(self._events_in_table) and not self.config.plotting.refresh:
             # No new events
             return [self.table_ax]
         if CHIME and not event_ids.issubset(self._events_in_table):
-            chime.info()
+            # New events!
+            if listener_events[0].time > self._most_recent_time:
+                print(f"New events!: {event_ids.difference(self._events_in_table)}")
+                chime.info()
+                self._most_recent_time = listener_events[0].time
         cells = self.event_table.get_celld()
         for row_num in range(MOST_RECENT):
             try:
@@ -523,17 +532,27 @@ class Plotter(object):
                     text = f"{text:.1f}"
                 # print(f"({row_num + 1}, {col_num}): {text}")
                 cell.set_text_props(text=text, ha="center")
-        self._events_in_table = event_ids
+        # Retain object
+        old_events = self._events_in_table.difference(event_ids)
+        self._events_in_table.update(event_ids)
+        # Remove old_events
+        for evid in old_events:
+            try:
+                self._events_in_table.remove(evid)
+            except KeyError:
+                pass
         return [self.table_ax]
 
     def update(self, *args, **kwargs):
+        major_tic = time.perf_counter()
         artists = []
         tic = time.perf_counter()
         artists.extend(self.update_waveforms())
         toc = time.perf_counter()
         Logger.info(f"Waveform update took {toc - tic:.3f}s")
-        if self.map_ax:
-            # pass
+        now = dt.datetime.now()
+        if self.map_ax and (now - self._map_update_time).total_seconds() >= self.config.plotting.map_update_interval:
+            # Update the map!
             tic = time.perf_counter()
             artists.extend(self.update_map())
             toc = time.perf_counter()
@@ -543,10 +562,17 @@ class Plotter(object):
             artists.extend(self.update_table())
             toc = time.perf_counter()
             Logger.info(f"Updating table took {toc - tic:.3f}s")
+            self._map_update_time = dt.datetime.now()
+        else:
+            # The map and table go blank if their artists are not returned
+            artists.extend(
+                [self.map_scatters, self.most_recent_scatter, self.table_ax])
         gc.collect()
         # Memory output
         # sum1 = summary.summarize(muppy.get_objects())
         # summary.print_(sum1)
+        major_toc = time.perf_counter()
+        Logger.info(f"Update took {major_toc - major_tic:.3f}s")
         return artists
 
     def animate(self):

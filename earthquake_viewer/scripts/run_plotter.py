@@ -3,7 +3,6 @@ Main script for running the plotter!
 """
 
 from earthquake_viewer.config.config import read_config
-from earthquake_viewer.plotting.plotter import Plotter
 
 
 def main():
@@ -22,6 +21,12 @@ def main():
     config = read_config(args.config)
     if args.verbose:
         config.setup_logging()
+
+    assert config.plotting.backend in ("bokeh", "matplotlib")
+    if config.plotting.backend == "matplotlib":
+        from earthquake_viewer.plotting.mpl_plotter import MPLPlotter as Plotter
+    else:
+        from earthquake_viewer.plotting.bokeh_plotter import BokehPlotter as Plotter
 
     plotter = Plotter(configuration=config)
     plotter.show()

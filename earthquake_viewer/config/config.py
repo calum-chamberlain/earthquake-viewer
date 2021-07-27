@@ -77,6 +77,7 @@ class PlottingConfig(_ConfigAttribDict):
         "lowcut": 1.0,
         "highcut": 10.0,
         "decimate": 1,
+        "backend": "matplotlib",
         "style": "eqv.mplstyle",
         "update_interval": 40,
         "plot_map": True,
