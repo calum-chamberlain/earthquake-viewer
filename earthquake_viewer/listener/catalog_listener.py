@@ -272,7 +272,7 @@ class CatalogListener(_Listener):
                 _starttime = now - self.keep
             else:
                 _starttime = self.previous_time - (5 * self.interval)
-            Logger.debug("Checking for new events between {0} and {1}".format(
+            Logger.info("Checking for new events between {0} and {1}".format(
                 _starttime, now))
             try:
                 new_events = self.client.get_events(
@@ -343,7 +343,7 @@ class CatalogListener(_Listener):
                         self.old_events))
             self.previous_time = now
             # Sleep in steps to make death responsive
-            _sleep_step = min(10.0, self.sleep_interval)
+            _sleep_step = min(0.5, self.sleep_interval)
             _slept = 0.0
             while _slept < self.sleep_interval:
                 _tic = time.time()

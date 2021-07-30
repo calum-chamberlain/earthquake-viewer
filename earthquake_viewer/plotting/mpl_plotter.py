@@ -436,7 +436,7 @@ class MPLPlotter(object):
             if isinstance(tr, Stream):
                 tr = tr.merge()[0]
             toc = time.perf_counter()
-            Logger.info(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
+            Logger.debug(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
 
             tic = time.perf_counter()
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
