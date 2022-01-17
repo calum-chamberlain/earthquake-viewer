@@ -113,9 +113,12 @@ def _time_string(seconds: int) -> str:
     elif 86400 > value >= 3600:
         value /= 3600
         unit = "hours"
-    elif value >= 86400:
+    elif 31536000 > value >= 86400:
         value /= 86400
         unit = "days"
+    elif value >= 31536000:
+        value /= 31536000
+        unit = "years"
 
     return f"{value:.1f} {unit}"
 
