@@ -170,9 +170,13 @@ class PlottingConfig(_ConfigAttribDict):
             maxlongitude=self.map_bounds[1])
         if populate:
             now = UTCDateTime.now()
-            catalog = client.get_events(
-                starttime=now - self.event_history, endtime=now,
-                **catalog_lookup_kwargs)
+            try:
+                catalog = client.get_events(
+                    starttime=now - self.event_history, endtime=now,
+                    **catalog_lookup_kwargs)
+            except Exception as e:
+                print(f"Could not populate catalog due to {e}")
+                catalog = None
         else:
             catalog = None
         return CatalogListener(
