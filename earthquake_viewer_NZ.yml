@@ -1,0 +1,93 @@
+earthquake_viewer:
+  seed ids:
+    # - NZ.RIZ.10.HHZ
+    #- NZ.GLKZ.10.HHZ
+    #- NZ.OUZ.10.HHZ
+    #- NZ.WCZ.10.HHZ
+    #- NZ.GRZ.10.HHZ
+    - NZ.KUZ.10.HHZ
+    #- NZ.MKAZ.10.HHZ
+    #- NZ.WSRZ.10.HHZ
+    # - NZ.WIZ.10.HHZ
+    - NZ.MXZ.10.HHZ
+    #- NZ.TOZ.10.HHZ
+    #- NZ.HAZ.10.HHZ
+    #- NZ.OPRZ.10.HHZ
+    - NZ.PUZ.10.HHZ
+    - NZ.URZ.10.HHZ
+    #- NZ.TLZ.10.HHZ
+    # - NZ.MWZ.10.HHZ
+    #- NZ.HIZ.10.HHZ
+    #- NZ.RTZ.10.HHZ
+    - NZ.FWVZ.10.HHZ
+    - NZ.WNVZ.11.EHZ
+    #- NZ.KNZ.10.HHZ
+    #- NZ.NTVZ.10.HHZ
+    #- NZ.TMVZ.10.HHZ
+    #- NZ.VRZ.10.HHZ
+    #- NZ.ETVZ.10.HHZ
+    #- NZ.OTVZ.10.HHZ
+    - NZ.BKZ.10.HHZ
+    #- NZ.WAZ.10.HHZ
+    - NZ.PXZ.10.HHZ
+    #- NZ.TSZ.10.HHZ
+    #- NZ.MRZ.10.HHZ
+    - NZ.BFZ.10.HHZ
+    #- NZ.QRZ.10.HHZ
+    #- NZ.NNZ.10.HHZ
+    - NZ.WEL.10.HHZ
+    - NZ.DSZ.10.HHZ
+    - NZ.THZ.10.HHZ
+    - NZ.KHZ.10.HHZ
+    - NZ.INZ.10.HHZ
+    # - NZ.LTZ.10.HHZ
+    - NZ.GVZ.10.HHZ
+    - NZ.WVZ.10.HHZ
+    # - NZ.OXZ.10.HHZ
+    #- NZ.FOZ.11.HHZ
+    - NZ.MQZ.10.HHZ
+    - NZ.RPZ.10.HHZ
+    # - NZ.RPZ.11.HHZ
+    #- NZ.CTZ.10.HHZ
+    - NZ.JCZ.10.HHZ
+    #- NZ.CVZ.10.HHZ
+    - NZ.LBZ.10.HHZ
+    # - NZ.MSZ.10.HHZ
+    - NZ.WKZ.10.HHZ
+    #- NZ.ODZ.10.HHZ
+    #- NZ.EAZ.10.HHZ
+    #- NZ.MLZ.10.HHZ
+    - NZ.DCZ.10.HHZ
+    #- NZ.OPZ.10.HHZ
+    #- NZ.WHZ.10.HHZ
+    #- NZ.TUZ.10.HHZ
+    - NZ.PYZ.10.HHZ
+    #- NZ.SYZ.10.HHZ
+    - NZ.APZ.10.HHZ
+log_formatter: "%(asctime)s\t[%(processName)s:%(threadName)s]: %(name)s\t%(levelname)s\t%(message)s"
+log_level: INFO
+plotting:
+  event history: 172800
+  figure size: !!python/tuple
+  - 10
+  - 10
+  highcut: 15
+  lowcut: 1.5
+  decimate: 3
+  style: seaborn-darkgrid
+  map bounds: !!python/tuple
+  - 165.96
+  - 180
+  - -47.23
+  - -34.54
+  map client: GEONET
+  map client type: FDSN
+  map update interval: 20
+  map width percent: 30
+  plot map: true
+  update interval: 20
+  label stations: true
+streaming:
+  buffer capacity: 600.0
+  rt client type: seedlink
+  rt client url: link.geonet.org.nz
