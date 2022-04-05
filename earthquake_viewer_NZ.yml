@@ -69,8 +69,8 @@ log_level: INFO
 plotting:
   event history: 172800
   figure size: !!python/tuple
-  - 10
-  - 10
+  - 30
+  - 15
   highcut: 15
   lowcut: 1.5
   decimate: 3
@@ -83,7 +83,7 @@ plotting:
   map client: GEONET
   map client type: FDSN
   map update interval: 20
-  map width percent: 30
+  map width percent: 25
   plot map: true
   update interval: 20
   label stations: true

@@ -69,6 +69,17 @@ def _scale_mags(magnitudes: Iterable) -> Iterable:
     return [m ** 3 for m in magnitudes]
 
 
+def largest_common_factor(a, b):
+    if b > a:
+        a, b = b, a
+    fac = b
+    while fac > 0:
+        if a % fac == 0 and b % fac == 0:
+            return fac
+        fac -= 1
+    return 1
+
+
 def _blit_draw(self, artists):
     # Handles blitted drawing, which renders only the artists given instead
     # of the entire figure.
@@ -155,7 +166,8 @@ class MPLPlotter(object):
         # Set up plots
         if configuration.plotting.plot_map:
             # Factorise the width to get a sensible number of columns
-            largest_factor = 100 % configuration.plotting.map_width_percent
+            largest_factor = largest_common_factor(
+                    100, int(configuration.plotting.map_width_percent))
             ncols = 100 // largest_factor
             map_width = (
                 configuration.plotting.map_width_percent // largest_factor)
@@ -414,7 +426,7 @@ class MPLPlotter(object):
                 Logger.debug(
                     f"{seed_id} not in {self._previous_plot_time.keys()}")
                 continue
-            Logger.debug(f"Working on data for {seed_id} ending "
+            Logger.info(f"Working on data for {seed_id} ending "
                          f"{tr.stats.endtime} - last plotted {plot_lim}")
             if tr.stats.endtime <= plot_lim:
                 continue  # No new data
@@ -439,7 +451,7 @@ class MPLPlotter(object):
             if isinstance(tr, Stream):
                 tr = tr.merge()[0]
             toc = time.perf_counter()
-            Logger.debug(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
+            Logger.info(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
 
             tic = time.perf_counter()
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
@@ -453,7 +465,7 @@ class MPLPlotter(object):
             # Update!
             self.waveform_lines[seed_id].set_data(times, data)
             toc = time.perf_counter()
-            Logger.debug(f"\tPlotting for {seed_id} took {toc - tic:.3f}s")
+            Logger.info(f"\tPlotting for {seed_id} took {toc - tic:.3f}s")
 
             # Get picks - only plot new picks!
             tic = time.perf_counter()
@@ -476,7 +488,7 @@ class MPLPlotter(object):
                         zorder=100)
                     _times[seed_id].append(pick_time)
             toc = time.perf_counter()
-            Logger.debug(f"\tPlotting picks for {seed_id} took {toc - tic:.3f}s")
+            Logger.info(f"\tPlotting picks for {seed_id} took {toc - tic:.3f}s")
 
         plot_starttime = (now - self.config.streaming.buffer_capacity).datetime
         self.waveform_axes.set_xlim(plot_starttime, now.datetime)

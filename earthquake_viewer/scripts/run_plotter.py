@@ -16,6 +16,9 @@ def main():
     parser.add_argument(
         "--verbose", '-v', action="store_true",
         help="Print output from logging to screen")
+    parser.add_argument(
+        "--full-screen", "-f", action="store_true",
+        help="Make plot fullscreen")
 
     args = parser.parse_args()
     config = read_config(args.config)
@@ -29,7 +32,7 @@ def main():
         from earthquake_viewer.plotting.bokeh_plotter import BokehPlotter as Plotter
 
     plotter = Plotter(configuration=config)
-    plotter.show()
+    plotter.show(full_screen=args.full_screen)
 
 
 if __name__ == "__main__":
