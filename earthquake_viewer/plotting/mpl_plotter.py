@@ -158,6 +158,8 @@ def _process_stream(
     return st
 
 def _process_tr(tr: Trace, freqmin: float, freqmax: float, decimate: int) -> Trace:
+    if decimate > 1:
+        tr = tr.split().decimate(decimate)
     if freqmin and freqmax:
         tr = tr.split().detrend().filter(
             "bandpass", freqmin=freqmin,
@@ -168,8 +170,6 @@ def _process_tr(tr: Trace, freqmin: float, freqmax: float, decimate: int) -> Tra
     elif freqmax:
         tr = tr.split().detrend().filter(
             "lowpass", freqmax)
-    if decimate > 1:
-        tr = tr.split().decimate(decimate)
     if isinstance(tr, Stream):
         tr = tr.merge()[0]
     return tr
