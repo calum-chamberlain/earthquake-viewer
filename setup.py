@@ -43,7 +43,7 @@ def setup_package():
 
     install_requires = [
         'numpy>=1.12', 'matplotlib>=1.3.0', 'obspy>=1.0.3', 'cartopy>=0.19', 'chime', 
-        'pyyaml', 'bokeh', 'pyproj']
+        'pyyaml', 'bokeh', 'pyproj', 'pympler']
 
     setup_args = {
         'name': 'Earthquake-Viewer',
