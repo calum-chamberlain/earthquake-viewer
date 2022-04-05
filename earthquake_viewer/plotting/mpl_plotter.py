@@ -19,6 +19,10 @@ from pympler import summary, muppy
 
 from typing import Iterable
 
+from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
+
+from functools import partial
+
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
 from matplotlib import cm
@@ -30,7 +34,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from cartopy.mpl.ticker import LongitudeLocator, LatitudeLocator
 
-from obspy import UTCDateTime, Stream
+from obspy import UTCDateTime, Stream, Trace
 
 from earthquake_viewer.config.config import Config
 from earthquake_viewer.listener.listener import EventInfo, PickInfo
@@ -134,6 +138,43 @@ def _time_string(seconds: int) -> str:
     return f"{value:.1f} {unit}"
 
 
+def _process_stream(
+    stream: Stream,
+    freqmin: float,
+    freqmax: float,
+    decimate: int,
+    executor: Executor,
+) -> Stream:
+    processor = partial(_process_tr, freqmin=freqmin, freqmax=freqmax, decimate=decimate)
+    futures = [executor.submit(processor, tr) for tr in stream]
+    st = Stream()
+    for future in as_completed(futures):
+        try:
+            tr = future.result()
+        except Exception as e:
+            Logger.error(f"Processing error: {e}")
+            continue
+        st += tr
+    return st
+
+def _process_tr(tr: Trace, freqmin: float, freqmax: float, decimate: int) -> Trace:
+    if freqmin and freqmax:
+        tr = tr.split().detrend().filter(
+            "bandpass", freqmin=freqmin,
+            freqmax=freqmax)
+    elif freqmin:
+        tr = tr.split().detrend().filter(
+            "highpass", freqmin)
+    elif freqmax:
+        tr = tr.split().detrend().filter(
+            "lowpass", freqmax)
+    if decimate > 1:
+        tr = tr.split().decimate(decimate)
+    if isinstance(tr, Stream):
+        tr = tr.merge()[0]
+    return tr
+
+
 class MPLPlotter(object):
     _timeout = 120  # Timeout limit for restarting streamer.
 
@@ -155,6 +196,7 @@ class MPLPlotter(object):
         self.config = configuration
         self.streamer = configuration.get_streamer()
         self.listener = configuration.get_listener()
+        self.process_pool = ProcessPoolExecutor()
         # Start background services
         if not self.listener.busy:
             Logger.info("Starting event listening service")
@@ -418,6 +460,18 @@ class MPLPlotter(object):
             return [self.waveform_axes]
         stream = self.streamer.stream.copy().merge()
 
+        Logger.info("Processing stream")
+        tic = time.perf_counter()
+        stream = _process_stream(
+            stream=stream,
+            freqmin=self.config.plotting.lowcut,
+            freqmax=self.config.plotting.highcut,
+            decimate=self.config.plotting.decimate,
+            executor=self.process_pool,
+        )
+        toc = time.perf_counter()
+        Logger.info(f"\tProcessing took {toc - tic:.3f}s")
+
         for tr in stream:
             seed_id = tr.id
             station = tr.stats.station
@@ -432,26 +486,6 @@ class MPLPlotter(object):
                 continue  # No new data
             # Update last data
             self._last_data = max(self._last_data, tr.stats.endtime)
-
-            # Process the data
-            # TODO: Process data outside of main event loop!
-            tic = time.perf_counter()
-            if self.config.plotting.lowcut and self.config.plotting.highcut:
-                tr = tr.split().detrend().filter(
-                    "bandpass", freqmin=self.config.plotting.lowcut,
-                    freqmax=self.config.plotting.highcut)
-            elif self.config.plotting.lowcut:
-                tr = tr.split().detrend().filter(
-                    "highpass", self.config.plotting.lowcut)
-            elif self.config.plotting.highcut:
-                tr = tr.split().detrend().filter(
-                    "lowpass", self.config.plotting.highcut)
-            if self.config.plotting.decimate > 1:
-                tr = tr.split().decimate(self.config.plotting.decimate)
-            if isinstance(tr, Stream):
-                tr = tr.merge()[0]
-            toc = time.perf_counter()
-            Logger.info(f"\tProcessing for {seed_id} took {toc - tic:.3f}s")
 
             tic = time.perf_counter()
             self._previous_plot_time.update({seed_id: tr.stats.endtime})
