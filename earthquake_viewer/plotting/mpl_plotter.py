@@ -159,7 +159,7 @@ def _process_stream(
 
 def _process_tr(tr: Trace, freqmin: float, freqmax: float, decimate: int) -> Trace:
     if decimate > 1:
-        tr = tr.split().decimate(decimate)
+        tr = tr.split().detrend().decimate(decimate)
     if freqmin and freqmax:
         tr = tr.split().detrend().filter(
             "bandpass", freqmin=freqmin,
@@ -503,12 +503,20 @@ class MPLPlotter(object):
 
             # Get picks - only plot new picks!
             tic = time.perf_counter()
+            # TODO: This lookup is slow - make old_events a lighter dict with just what we need, or make picks dicts in listener
             p_picks = [p for ev in self.listener.old_events 
                        for p in ev.p_picks if p.station == station
                        and p.time > plot_starttime]
+            _toc = time.perf_counter()
+            Logger.info(f"Finding p picks took {_toc - tic:.3f}s")
+            _tic = time.perf_counter()
             s_picks = [p for ev in self.listener.old_events 
                        for p in ev.s_picks if p.station == station
                        and p.time > plot_starttime]
+            _toc = time.perf_counter()
+            Logger.info(f"Finding s picks took {_toc - _tic:.3f}s")
+
+            tic = time.perf_counter()
             for pcolor, _picks, _times in zip(
                     [PCOLOR, SCOLOR], [p_picks, s_picks],
                     [self.p_times, self.s_times]):
