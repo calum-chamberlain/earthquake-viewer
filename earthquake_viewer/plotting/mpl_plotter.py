@@ -413,10 +413,10 @@ class MPLPlotter(object):
             return []
         listener_events = self.listener.old_events
         # Plot the new events!
-        positions = [(ev.longitude, ev.latitude) for ev in listener_events]
-        depths = np.array([ev.depth for ev in listener_events]) / 1000.0
-        mags = np.array([ev.magnitude for ev in listener_events])
-        times = np.array([now - ev.time for ev in listener_events])
+        positions = [(ev.longitude or 0.0, ev.latitude or 0.0) for ev in listener_events]
+        depths = np.array([ev.depth or 0.0 for ev in listener_events]) / 1000.0
+        mags = np.array([ev.magnitude or 0.0 for ev in listener_events])
+        times = np.array([now - (ev.time or UTCDateTime(0)) for ev in listener_events])
         alphas = 1 - (times / self.config.plotting.event_history)
         # Ensure boundedness
         alphas[alphas < 0] = 0
