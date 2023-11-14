@@ -1,0 +1,40 @@
+[build-system]
+requires = ['hatchling']
+build-backend = 'hatchling.build'
+
+[project]
+name = "earthquake-viewer"
+version = "0.0.1"
+authors = [
+  { name="Calum Chamberlain", email="calum.chamberlain@vuw.ac.nz" },
+]
+description="Real-time viewing of seismic data and earthquake catalogues"
+readme = "README.md"
+requires-python = ">3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+   "obspy",
+   "matplotlib",
+   "numpy",
+   "cartopy",
+   "chime",
+   "pyyaml",
+   "bokeh",
+   "pyproj",
+   "pympler"
+]
+
+
+
+[project.scripts]
+eqv-run-plotter = "earthquake_viewer.scripts.run_plotter:main"
+
+[project.urls]
+"Homepage" = "https://github.com/calum-chamberlain/earthquake-viewer"
+"Bug Tracker" = "https://github.com/calum-chamberlain/earthquake-viewer/issues"
+
