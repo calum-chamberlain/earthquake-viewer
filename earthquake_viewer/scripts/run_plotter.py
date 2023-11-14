@@ -2,6 +2,7 @@
 Main script for running the plotter!
 """
 
+import matplotlib
 from earthquake_viewer.config.config import read_config
 
 
@@ -19,6 +20,9 @@ def main():
     parser.add_argument(
         "--full-screen", "-f", action="store_true",
         help="Make plot fullscreen")
+    parser.add_argument(
+        "--backend", "-b", type=str, default=None,
+        help="Matplotlib backend to use, defaults to system default")
 
     args = parser.parse_args()
     config = read_config(args.config)
@@ -27,6 +31,8 @@ def main():
 
     assert config.plotting.backend in ("bokeh", "matplotlib")
     if config.plotting.backend == "matplotlib":
+        if args.backend:
+            matplotlib.use(args.backend)
         from earthquake_viewer.plotting.mpl_plotter import MPLPlotter as Plotter
     else:
         from earthquake_viewer.plotting.bokeh_plotter import BokehPlotter as Plotter
