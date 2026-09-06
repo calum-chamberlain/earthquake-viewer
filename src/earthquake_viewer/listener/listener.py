@@ -167,7 +167,7 @@ class _Listener(ABC):
         # listening_thread.daemon = True
         listening_thread.start()
         self.processes.append(listening_thread)
-        Logger.info("Started listening to {0}".format(self.client.base_url))
+        Logger.info("Started listening to {0}".format(self.client))
 
     def background_stop(self):
         Logger.info("Adding Poison to Kill Queue")
