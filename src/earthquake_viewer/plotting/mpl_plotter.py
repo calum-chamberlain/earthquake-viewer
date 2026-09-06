@@ -641,7 +641,10 @@ class MPLPlotter(object):
     def show(self, full_screen: bool = True):
         self.initialise_plot()
         if full_screen:
-            self.fig.canvas.manager.full_screen_toggle()
+            try:
+                self.fig.canvas.manager.full_screen_toggle()
+            except Exception as e:
+                Logger.exception("Could not run fullscreen, continuing")
         ani = self.animate()
         plt.show(block=True)
         # Close the streamer when the plot closes
