@@ -173,7 +173,7 @@ class CatalogListener(_Listener):
         _Listener.__init__(self)  # Init ABC to get the queues
         # Clients cannot themselves be pickled, so we need to cope
         if isinstance(client, FDSNClient):
-            self.client = self.base_url
+            self.client = client.base_url
         else:
             self.client = client
         if catalog is None:
