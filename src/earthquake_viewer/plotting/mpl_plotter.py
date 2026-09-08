@@ -413,10 +413,10 @@ class MPLPlotter(object):
             return []
         listener_events = self.listener.old_events
         # Plot the new events!
-        positions = [(ev.longitude, ev.latitude) for ev in listener_events]
-        depths = np.array([ev.depth for ev in listener_events]) / 1000.0
-        mags = np.array([ev.magnitude for ev in listener_events])
-        times = np.array([now - ev.time for ev in listener_events])
+        positions = [(ev.longitude or 0.0, ev.latitude or 0.0) for ev in listener_events]
+        depths = np.array([ev.depth or 0.0 for ev in listener_events]) / 1000.0
+        mags = np.array([ev.magnitude or 0.0 for ev in listener_events])
+        times = np.array([now - (ev.time or UTCDateTime(0)) for ev in listener_events])
         alphas = 1 - (times / self.config.plotting.event_history)
         # Ensure boundedness
         alphas[alphas < 0] = 0
@@ -444,7 +444,10 @@ class MPLPlotter(object):
         now = UTCDateTime.now()
         plot_starttime = now - self.config.streaming.buffer_capacity
         # Check that the streamer is alive!
-        if self.streamer.last_data and now - self.streamer.last_data > self._timeout:
+        while self.streamer.last_data is None:
+            Logger.info("Waiting for streamer to get data")
+            time.sleep(2)
+        if now - self.streamer.last_data > self._timeout:
             Logger.error(
                 f"No new data for {now - self.streamer.last_data:.2f}s, "
                 f"restarting streamer")
@@ -641,7 +644,10 @@ class MPLPlotter(object):
     def show(self, full_screen: bool = True):
         self.initialise_plot()
         if full_screen:
-            self.fig.canvas.manager.full_screen_toggle()
+            try:
+                self.fig.canvas.manager.full_screen_toggle()
+            except Exception as e:
+                Logger.exception("Could not run fullscreen, continuing")
         ani = self.animate()
         plt.show(block=True)
         # Close the streamer when the plot closes

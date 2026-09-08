@@ -10,6 +10,7 @@ from queue import Empty
 
 from obspy import UTCDateTime, Catalog
 from obspy.core.event import Event
+from obspy.clients.fdsn import Client as FDSNClient
 
 from earthquake_viewer.listener.listener import _Listener, summarise_event
 
@@ -170,7 +171,11 @@ class CatalogListener(_Listener):
         refresh: bool = True,
     ):
         _Listener.__init__(self)  # Init ABC to get the queues
-        self.client = client
+        # Clients cannot themselves be pickled, so we need to cope
+        if isinstance(client, FDSNClient):
+            self.client = client.base_url
+        else:
+            self.client = client
         if catalog is None:
             catalog = Catalog()
         self.old_events = [summarise_event(ev) for ev in catalog]
@@ -242,6 +247,11 @@ class CatalogListener(_Listener):
             If the `filter_func` has changed then this should be the
             additional kwargs for the user-defined filter_func.
         """
+        # Can't pickle FDSN client, so we recreate it here if needed.
+        if isinstance(self.client, str):
+            client = FDSNClient(self.client)
+        else:
+            client = self.client
         if starttime is None:
             self.previous_time -= self._test_start_step
         else:
@@ -275,7 +285,7 @@ class CatalogListener(_Listener):
             Logger.info("Checking for new events between {0} and {1}".format(
                 _starttime, now))
             try:
-                new_events = self.client.get_events(
+                new_events = client.get_events(
                     starttime=_starttime, endtime=now,
                     **self.catalog_lookup_kwargs)
             except Exception as e:

@@ -359,6 +359,8 @@ class Config(object):
         """Set up logging using the logging parameters."""
         handlers = []
         if file:
+            filename = os.path.abspath(filename)
+            print(f"Writing logs to {filename}")
             file_log_args = dict(filename=filename, mode='a',
                                  maxBytes=20*1024*1024, backupCount=2,
                                  encoding=None, delay=0)
@@ -397,7 +399,11 @@ def read_config(config_file=None) -> Config:
     if config_file is None:
         return Config()
     if not os.path.isfile(config_file):
-        raise FileNotFoundError(config_file)
+        # Try opening the file in this directory
+        Logger.error(f"Could not read {config_file}. Looking in {os.path.dirname(__file__)}")
+        config_file = os.path.join(os.path.dirname(__file__), config_file)
+        if not os.path.isfile(config_file):
+            raise FileNotFoundError(config_file)
     with open(config_file, "rb") as f:
         configuration = load(f, Loader=Loader)
     config_dict = {}
