@@ -4,6 +4,7 @@ Listener ABC.
 
 import logging
 import time
+import warnings
 
 from abc import ABC, abstractmethod
 from collections import namedtuple
@@ -15,17 +16,20 @@ from obspy import UTCDateTime
 from obspy.core.event import Event, Origin
 from obspy.core.event.origin import Pick
 
-import platform
-if platform.system() != "Linux":
-    warnings.warn("Currently Process-based streaming is only supported on "
-                  "Linux, defaulting to Thread-based streaming - you may run "
-                  "into delayed plotting when updating often")
-    import threading as multiprocessing
-    from queue import Queue
-    from threading import Thread as Process
-else:
-    import multiprocessing
-    from multiprocessing import Queue, Process
+# import platform
+# if platform.system() != "Linux":
+#     warnings.warn("Currently Process-based streaming is only supported on "
+#                   "Linux, defaulting to Thread-based streaming - you may run "
+#                   "into delayed plotting when updating often")
+#     import threading as multiprocessing
+#     from queue import Queue
+#     from threading import Thread as Process
+# else:
+#     import multiprocessing
+#     from multiprocessing import Queue, Process
+import multiprocessing
+from multiprocessing import Queue, Process
+
 
 Logger = logging.getLogger(__name__)
 

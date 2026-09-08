@@ -444,7 +444,7 @@ class MPLPlotter(object):
         now = UTCDateTime.now()
         plot_starttime = now - self.config.streaming.buffer_capacity
         # Check that the streamer is alive!
-        if now - self.streamer.last_data > self._timeout:
+        if self.streamer.last_data and now - self.streamer.last_data > self._timeout:
             Logger.error(
                 f"No new data for {now - self.streamer.last_data:.2f}s, "
                 f"restarting streamer")

@@ -21,17 +21,20 @@ from obspy import Stream, Trace, UTCDateTime
 
 from earthquake_viewer.streaming.buffers import Buffer
 
-import platform
-if platform.system() != "Linux":
-    warnings.warn("Currently Process-based streaming is only supported on "
-                  "Linux, defaulting to Thread-based streaming - you may run "
-                  "into delayed plotting when updating often")
-    import threading as multiprocessing
-    from queue import Queue
-    from threading import Thread as Process
-else:
-    import multiprocessing
-    from multiprocessing import Queue, Process
+# import platform
+# if platform.system() != "Linux":
+#     warnings.warn("Currently Process-based streaming is only supported on "
+#                   "Linux, defaulting to Thread-based streaming - you may run "
+#                   "into delayed plotting when updating often")
+#     import threading as multiprocessing
+#     from queue import Queue
+#     from threading import Thread as Process
+# else:
+#     import multiprocessing
+#     from multiprocessing import Queue, Process
+
+import multiprocessing
+from multiprocessing import Queue, Process
 
 Logger = logging.getLogger(__name__)
 
